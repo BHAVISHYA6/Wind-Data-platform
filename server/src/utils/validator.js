@@ -1,12 +1,23 @@
-const isBlank = (value) => value === undefined || value === null || String(value).trim() === '';
+const isBlank = (value) => {
+	return (
+		value === undefined ||
+		value === null ||
+		String(value).trim() === ''
+	);
+};
 
 const isValidDate = (value) => {
 	if (isBlank(value)) {
 		return false;
 	}
 
-	const parsedDate = new Date(value);
-	return !Number.isNaN(parsedDate.getTime());
+	// Expected format:
+	// DD-MM-YYYY HH:mm
+
+	const regex =
+		/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/;
+
+	return regex.test(String(value).trim());
 };
 
 const isValidNumber = (value) => {
@@ -15,26 +26,35 @@ const isValidNumber = (value) => {
 	}
 
 	const numberValue = Number(value);
+
 	return Number.isFinite(numberValue);
 };
 
-const normalizeFieldName = (fieldName) =>
-	String(fieldName)
+const normalizeFieldName = (fieldName) => {
+	return String(fieldName)
 		.toLowerCase()
 		.replace(/[^a-z0-9]/g, '');
+};
 
 const isWindSpeedField = (fieldName) => {
-	const normalizedFieldName = normalizeFieldName(fieldName);
-	return normalizedFieldName.includes('windspeed') || normalizedFieldName.includes('speed');
+	const normalizedFieldName =
+		normalizeFieldName(fieldName);
+
+	return (
+		normalizedFieldName.includes('windspeed') ||
+		normalizedFieldName.includes('avgms') ||
+		normalizedFieldName.includes('speed')
+	);
 };
 
 const isWindDirectionField = (fieldName) => {
-	const normalizedFieldName = normalizeFieldName(fieldName);
+	const normalizedFieldName =
+		normalizeFieldName(fieldName);
+
 	return (
 		normalizedFieldName.includes('winddirection') ||
-		normalizedFieldName.includes('direction') ||
-		normalizedFieldName.includes('winddir') ||
-		normalizedFieldName.endsWith('dir')
+		normalizedFieldName.includes('wv') ||
+		normalizedFieldName.includes('direction')
 	);
 };
 
@@ -44,58 +64,124 @@ const validateRange = (value, min, max) => {
 	}
 
 	const numericValue = Number(value);
-	return numericValue >= min && numericValue <= max;
+
+	return (
+		numericValue >= min &&
+		numericValue <= max
+	);
 };
 
-const buildMissingValueError = (rowIndex, fieldName) =>
-	`Row ${rowIndex + 1}: ${fieldName} is missing`;
+const buildMissingValueError = (
+	rowIndex,
+	fieldName
+) => {
+	return `Row ${
+		rowIndex + 1
+	}: ${fieldName} is missing`;
+};
 
-const buildRangeError = (rowIndex, fieldName, min, max, value, label) =>
-	`Row ${rowIndex + 1}: ${label} ${fieldName} must be between ${min} and ${max} (${value})`;
+const buildRangeError = (
+	rowIndex,
+	fieldName,
+	min,
+	max,
+	value,
+	label
+) => {
+	return `Row ${
+		rowIndex + 1
+	}: ${label} ${fieldName} must be between ${min} and ${max} (${value})`;
+};
 
-const validateWindTurbineRow = (row = {}, rowIndex = 0) => {
+const validateWindTurbineRow = (
+	row = {},
+	rowIndex = 0
+) => {
 	const errors = [];
+
 	const fieldNames = Object.keys(row);
+
 	const timestampValue = row.timestamp;
 
+	// Timestamp validation
 	if (isBlank(timestampValue)) {
-		errors.push(buildMissingValueError(rowIndex, 'timestamp'));
+		errors.push(
+			buildMissingValueError(
+				rowIndex,
+				'timestamp'
+			)
+		);
 	} else if (!isValidDate(timestampValue)) {
-		errors.push(`Row ${rowIndex + 1}: timestamp must be a valid date`);
+		errors.push(
+			`Row ${
+				rowIndex + 1
+			}: timestamp format invalid`
+		);
 	}
 
-	const speedFields = fieldNames.filter(isWindSpeedField);
-	const directionFields = fieldNames.filter(isWindDirectionField);
+	// Dynamic wind field detection
+	const speedFields =
+		fieldNames.filter(isWindSpeedField);
 
-	if (speedFields.length === 0) {
-		errors.push(`Row ${rowIndex + 1}: at least one wind speed field is required`);
-	}
+	const directionFields = fieldNames.filter(
+		isWindDirectionField
+	);
 
-	if (directionFields.length === 0) {
-		errors.push(`Row ${rowIndex + 1}: at least one wind direction field is required`);
-	}
-
+	// Wind speed validation
 	speedFields.forEach((fieldName) => {
 		const value = row[fieldName];
+
 		if (isBlank(value)) {
-			errors.push(buildMissingValueError(rowIndex, fieldName));
+			errors.push(
+				buildMissingValueError(
+					rowIndex,
+					fieldName
+				)
+			);
+
 			return;
 		}
 
-		if (!validateRange(value, 2, 60)) {
-			errors.push(buildRangeError(rowIndex, fieldName, 2, 60, value, 'wind speed'));
+		if (!validateRange(value, 0, 60)) {
+			errors.push(
+				buildRangeError(
+					rowIndex,
+					fieldName,
+					0,
+					60,
+					value,
+					'wind speed'
+				)
+			);
 		}
 	});
 
+	// Wind direction validation
 	directionFields.forEach((fieldName) => {
 		const value = row[fieldName];
+
 		if (isBlank(value)) {
-			errors.push(buildMissingValueError(rowIndex, fieldName));
+			errors.push(
+				buildMissingValueError(
+					rowIndex,
+					fieldName
+				)
+			);
+
 			return;
 		}
 
 		if (!validateRange(value, 0, 360)) {
-			errors.push(buildRangeError(rowIndex, fieldName, 0, 360, value, 'wind direction'));
+			errors.push(
+				buildRangeError(
+					rowIndex,
+					fieldName,
+					0,
+					360,
+					value,
+					'wind direction'
+				)
+			);
 		}
 	});
 
@@ -105,17 +191,34 @@ const validateWindTurbineRow = (row = {}, rowIndex = 0) => {
 	};
 };
 
-const validateWindTurbineCsv = (rows = []) => {
-	const errors = [];
+const validateWindTurbineCsv = (
+	rows = []
+) => {
+	const validRows = [];
+
+	const invalidRows = [];
 
 	rows.forEach((row, rowIndex) => {
-		const rowResult = validateWindTurbineRow(row, rowIndex);
-		errors.push(...rowResult.errors);
+		const result =
+			validateWindTurbineRow(
+				row,
+				rowIndex
+			);
+
+		if (result.valid) {
+			validRows.push(row);
+		} else {
+			invalidRows.push({
+				rowNumber: rowIndex + 1,
+				errors: result.errors,
+				rawData: row,
+			});
+		}
 	});
 
 	return {
-		valid: errors.length === 0,
-		errors,
+		validRows,
+		invalidRows,
 	};
 };
 
