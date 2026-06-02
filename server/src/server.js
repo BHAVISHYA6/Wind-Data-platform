@@ -19,7 +19,11 @@ const startServer = async () => {
   await connectDB();
 
   app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`\n✅ Server running at http://localhost:${PORT}\n`);
+    console.log('📊 Analytics API Endpoints:');
+    console.log(`   • http://localhost:${PORT}/api/analytics/summary`);
+    console.log(`   • http://localhost:${PORT}/api/analytics/timeseries`);
+    console.log(`   • http://localhost:${PORT}/api/analytics/errorlogs\n`);
   });
 };
 

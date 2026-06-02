@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const healthRoutes = require('./routes/healthRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 
 const app = express();
 
@@ -11,6 +12,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/', healthRoutes);
 app.use('/api', uploadRoutes);
+app.use('/api/analytics', analyticsRoutes);
 app.use((req, res) => {
   res.status(404).json({
     success: false,

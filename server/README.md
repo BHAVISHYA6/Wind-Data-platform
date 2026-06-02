@@ -134,6 +134,40 @@ This README summarizes the CSV ingestion pipeline, how each module works, and st
 
 ---
 
+**Complete flowchart of files involved**
+
+```mermaid
+flowchart TD
+  A[Client uploads CSV] --> B[src/routes/uploadRoutes.js]
+  B --> C[multer stores file in upload/]
+  C --> D[src/controllers/uploadController.js]
+  D --> E[fs.readFile reads CSV file]
+  E --> F[PapaParse parses CSV text]
+  F --> G[src/utils/columnMapper.js]
+  G --> H[Mapped row objects]
+  H --> I[src/utils/validator.js]
+  I --> J{Row valid?}
+  J -->|Yes| K[src/models/WindData.js]
+  J -->|No| L[src/models/ErrorLog.js]
+  K --> M[MongoDB WindData collection]
+  L --> N[MongoDB ErrorLog collection]
+  M --> O[Summary response]
+  N --> O
+  D --> P[Temp file deleted]
+```
+
+**File-by-file path**
+- `src/routes/uploadRoutes.js`: receives the request and runs `multer`.
+- `src/controllers/uploadController.js`: reads, parses, maps, validates, stores, and responds.
+- `src/utils/columnMapper.js`: normalizes and standardizes headers.
+- `src/utils/validator.js`: checks row rules and produces errors.
+- `src/models/WindData.js`: stores valid turbine data.
+- `src/models/ErrorLog.js`: stores invalid rows and error details.
+- `upload/`: temporary file storage directory.
+- `package.json`: provides `start` and `dev` scripts.
+
+---
+
 **Why each module is needed (quick)**
 - `routes/uploadRoutes.js`: route + multer middleware.
 - `controllers/uploadController.js`: orchestrates parse->map->validate->store.
