@@ -1,0 +1,31 @@
+.summarySection {
+  width: 100%;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.summaryCell {
+  grid-column: span 12;
+}
+
+@media (min-width: 600px) {
+  .summaryCell {
+    grid-column: span 6;
+  }
+}
+
+@media (min-width: 900px) {
+  .summaryCell {
+    grid-column: span 4;
+  }
+}
+
+@media (min-width: 1536px) {
+  .summaryCell {
+    grid-column: span 2;
+  }
+}

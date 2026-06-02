@@ -1,0 +1,9 @@
+.pageShell {
+  min-height: 100vh;
+  padding: 32px 0 48px;
+}
+
+.pageContainer {
+  display: grid;
+  gap: 22px;
+}

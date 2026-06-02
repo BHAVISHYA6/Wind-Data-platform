@@ -1,0 +1,42 @@
+.card {
+  position: relative;
+  overflow: hidden;
+  min-height: 172px;
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.8), rgba(15, 23, 42, 0.56));
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  box-shadow: 0 16px 35px rgba(2, 6, 23, 0.28);
+}
+
+.accentLine {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+}
+
+.iconWrap {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+}
+
+.label {
+  color: rgba(191, 219, 254, 0.76);
+  letter-spacing: 0.12em !important;
+}
+
+.value {
+  color: #f8fafc;
+  line-height: 1.05 !important;
+}
+
+.delta {
+  color: rgba(203, 213, 225, 0.72);
+}

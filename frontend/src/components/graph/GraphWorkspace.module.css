@@ -1,0 +1,32 @@
+.workspace {
+  padding: 24px;
+  border-radius: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.56));
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.title {
+  color: #f8fafc;
+}
+
+.subtitle {
+  max-width: 900px;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.chartPlaceholder {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  min-height: 520px;
+  padding: 28px;
+  border-radius: 24px;
+  border: 1px dashed rgba(125, 211, 252, 0.38);
+  background:
+    radial-gradient(circle at center, rgba(56, 189, 248, 0.11), transparent 46%),
+    rgba(2, 6, 23, 0.28);
+  text-align: center;
+  color: rgba(226, 232, 240, 0.86);
+}

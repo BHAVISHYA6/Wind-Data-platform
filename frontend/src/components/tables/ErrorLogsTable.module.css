@@ -1,0 +1,39 @@
+.tableCard {
+  padding: 24px;
+  border-radius: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.56));
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.title {
+  color: #f8fafc;
+}
+
+.subtitle {
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.tableContainer {
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.tableContainer :global(.MuiTableHead-root .MuiTableCell-root) {
+  background: rgba(15, 23, 42, 0.94);
+  color: #cbd5e1;
+  font-weight: 700;
+}
+
+.tableContainer :global(.MuiTableBody-root .MuiTableCell-root) {
+  background: rgba(2, 6, 23, 0.26);
+  color: rgba(226, 232, 240, 0.88);
+  border-bottom-color: rgba(148, 163, 184, 0.08);
+}
+
+.rowChip {
+  background: rgba(59, 130, 246, 0.12) !important;
+  color: #bfdbfe !important;
+}
