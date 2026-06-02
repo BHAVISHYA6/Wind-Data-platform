@@ -1,10 +1,10 @@
 import {
   FiActivity,
   FiAlertTriangle,
+  FiCheckCircle,
   FiDroplet,
   FiWind,
   FiThermometer,
-  FiCheckCircle,
   FiBarChart2,
 } from 'react-icons/fi';
 
@@ -14,50 +14,113 @@ export const datasetStatus = {
   tone: 'success',
 };
 
-export const summaryCards = [
+export const defaultSummaryCards = [
   {
     title: 'Total Records',
-    value: '17,240',
-    delta: '+4.8%',
+    value: '--',
+    delta: 'loading from API',
     icon: FiActivity,
     accent: '#60a5fa',
   },
   {
     title: 'Valid Records',
-    value: '16,812',
-    delta: '97.5%',
+    value: '--',
+    delta: 'loading from API',
     icon: FiCheckCircle,
     accent: '#34d399',
   },
   {
     title: 'Invalid Records',
-    value: '428',
-    delta: '2.5%',
+    value: '--',
+    delta: 'loading from API',
     icon: FiAlertTriangle,
     accent: '#fb7185',
   },
   {
     title: 'Average Wind Speed',
-    value: '6.8 m/s',
-    delta: 'stable',
+    value: 'N/A',
+    delta: 'not available yet',
     icon: FiWind,
     accent: '#38bdf8',
   },
   {
     title: 'Average Temperature',
-    value: '24.2 °C',
-    delta: '+0.4 °C',
+    value: '--',
+    delta: 'loading from API',
     icon: FiThermometer,
     accent: '#f59e0b',
   },
   {
     title: 'Average Humidity',
-    value: '61.4%',
-    delta: '-1.2%',
+    value: '--',
+    delta: 'loading from API',
     icon: FiDroplet,
     accent: '#22d3ee',
   },
 ];
+
+export const buildSummaryCards = (summaryData) => {
+  if (!summaryData) {
+    return defaultSummaryCards;
+  }
+
+  const totalRecords = Number(summaryData.totalRecords ?? 0);
+  const totalErrorLogs = Number(summaryData.totalErrorLogs ?? 0);
+  const validRecords = Math.max(totalRecords - totalErrorLogs, 0);
+  const avgHumidity =
+    summaryData.avgHumidity === null || summaryData.avgHumidity === undefined
+      ? 'N/A'
+      : `${Number(summaryData.avgHumidity).toFixed(2)}%`;
+  const avgTemperature =
+    summaryData.avgTemperature === null || summaryData.avgTemperature === undefined
+      ? 'N/A'
+      : `${Number(summaryData.avgTemperature).toFixed(2)} °C`;
+
+  return [
+    {
+      title: 'Total Records',
+      value: totalRecords.toLocaleString(),
+      delta: 'from API',
+      icon: FiActivity,
+      accent: '#60a5fa',
+    },
+    {
+      title: 'Valid Records',
+      value: validRecords.toLocaleString(),
+      delta: totalRecords > 0 ? `${((validRecords / totalRecords) * 100).toFixed(1)}% valid` : '0% valid',
+      icon: FiCheckCircle,
+      accent: '#34d399',
+    },
+    {
+      title: 'Invalid Records',
+      value: totalErrorLogs.toLocaleString(),
+      delta: totalRecords > 0 ? `${((totalErrorLogs / totalRecords) * 100).toFixed(1)}% invalid` : '0% invalid',
+      icon: FiAlertTriangle,
+      accent: '#fb7185',
+    },
+    {
+      title: 'Average Wind Speed',
+      value: 'N/A',
+      delta: 'not available yet',
+      icon: FiWind,
+      accent: '#38bdf8',
+    },
+    {
+      title: 'Average Temperature',
+      value: avgTemperature,
+      delta: 'from API',
+      icon: FiThermometer,
+      accent: '#f59e0b',
+    },
+    {
+      title: 'Average Humidity',
+      value: avgHumidity,
+      delta: 'from API',
+      icon: FiDroplet,
+      accent: '#22d3ee',
+    },
+  ];
+};
 
 export const graphTabs = [
   { label: 'Wind Speed', icon: FiWind },
