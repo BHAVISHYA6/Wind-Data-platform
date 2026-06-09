@@ -2,7 +2,7 @@ import { Box, Button, Chip, Paper, Stack, Typography } from '@mui/material';
 import { FiDatabase, FiUploadCloud, FiWind } from 'react-icons/fi';
 import styles from './DashboardHeader.module.css';
 
-export default function DashboardHeader({ status }) {
+export default function DashboardHeader({ status, onUploadClick }) {
   return (
     <Paper className={styles.headerCard} elevation={0}>
       <Box className={styles.headerGlow} />
@@ -35,7 +35,12 @@ export default function DashboardHeader({ status }) {
             variant="outlined"
             className={styles.statusChip}
           />
-          <Button variant="contained" startIcon={<FiUploadCloud />} className={styles.uploadButton}>
+          <Button
+            variant="contained"
+            startIcon={<FiUploadCloud />}
+            className={styles.uploadButton}
+            onClick={onUploadClick}
+          >
             Upload Dataset
           </Button>
         </Stack>
