@@ -1,12 +1,12 @@
-# Industrial Wind Telemetry & Analytics Platform 🌬️📊
+# Wind Data Platform
 
-The **Industrial Wind Telemetry & Analytics Platform** is an enterprise-grade, high-performance web application designed for wind farm developers, meteorologists, and data engineers. The platform processes, validates, archives, and visualizes high-frequency meteorological mast data (met mast) captured from multiple sensor arrays at varying heights.
+The **Wind Data Platform** is an enterprise-grade, high-performance web application designed for wind farm developers, meteorologists, and data engineers. The platform processes, validates, archives, and visualizes high-frequency meteorological mast data (met mast) captured from multiple sensor arrays at varying heights.
 
 Built with a modern tech stack (**React, Vite, Node.js, Express, and MongoDB**), this platform provides automated data cleaning pipelines, strict boundary checks, error auditing, and responsive multi-metric overlay visualization charts.
 
 ---
 
-## 🏗️ Architectural Overview & Data Flow
+##  Architectural Overview & Data Flow
 
 Here is a simple overview of how data flows through the platform:
 
@@ -37,7 +37,7 @@ Here is a simple overview of how data flows through the platform:
 
 ---
 
-## ⚡ Core Engineering & Scalability Design
+## Core Engineering & Scalability Design
 
 This platform is engineered to solve key production-level challenges encountered when handling industrial telemetry data:
 
@@ -48,7 +48,7 @@ This platform is engineered to solve key production-level challenges encountered
 
 ---
 
-## ✨ Features Checklist
+##  Features Checklist
 
 ### Ingestion & Pipeline
 - [x] **Large File Support:** Extended request timeouts up to 120 seconds to support larger datasets.
@@ -64,7 +64,7 @@ This platform is engineered to solve key production-level challenges encountered
 
 ---
 
-## 📂 Project Structure
+##  Project Structure
 
 ```text
 Wind-Data-platform/
@@ -95,7 +95,7 @@ Wind-Data-platform/
 
 ---
 
-## 🚀 Local Setup & Installation
+##  Local Setup & Installation
 
 Follow these instructions to run the platform locally:
 
@@ -162,7 +162,7 @@ Follow these instructions to run the platform locally:
 
 ---
 
-## 🧪 Testing with Sample Data
+##  Testing with Sample Data
 1. Select **Upload Dataset** from the dashboard header.
 2. Drag and drop [test_wind_data.csv](file:///c:/Vayumitra/DEV/My_work/Wind-Data-platform/test_wind_data.csv) from the root project folder.
 3. Observe real-time progress indicators as they move through parsing and validation.
@@ -170,13 +170,3 @@ Follow these instructions to run the platform locally:
 
 ---
 
-## 🔌 API Documentation
-
-| Endpoint | Method | Payload / Query | Description |
-| :--- | :--- | :--- | :--- |
-| `/api/upload` | `POST` | `multipart/form-data` | Ingests CSV dataset. Returns metrics and bench timings. |
-| `/api/analytics/datasets` | `GET` | None | Lists historical datasets. |
-| `/api/analytics/summary` | `GET` | `?datasetId=...` | Returns statistics (Total, Valid, Invalid, Averages). |
-| `/api/analytics/timeseries` | `GET` | `?datasetId=...&limit=...` | Returns observations sorted by timestamp. |
-| `/api/analytics/errorlogs` | `GET` | `?datasetId=...` | Returns validation error details. |
-| `/health` | `GET` | None | Server health status check. |
