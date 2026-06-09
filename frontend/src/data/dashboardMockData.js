@@ -157,6 +157,7 @@ export const graphTabs = [
   { label: 'Wind Direction', icon: FiCompass },
   { label: 'Temperature', icon: FiThermometer },
   { label: 'Humidity', icon: FiDroplet },
+  { label: 'Pressure', icon: FiActivity },
   { label: 'Scatter Analysis', icon: FiTrendingUp },
   { label: 'Additional Metrics', icon: FiSliders },
 ];

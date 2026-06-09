@@ -30,10 +30,19 @@ const LazyPlot = lazy(() => import('../chart/PlotlyWrapper'));
 
 export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, hasError }) {
   // --- Wind Speed Tab States ---
-  const [selectedHeights, setSelectedHeights] = useState({});
+  const [selectedSpeedCols, setSelectedSpeedCols] = useState({});
 
   // --- Wind Direction Tab States ---
-  const [selectedDirections, setSelectedDirections] = useState({});
+  const [selectedDirectionCols, setSelectedDirectionCols] = useState({});
+
+  // --- Temperature Tab States ---
+  const [selectedTempCol, setSelectedTempCol] = useState('');
+
+  // --- Humidity Tab States ---
+  const [selectedHumidityCol, setSelectedHumidityCol] = useState('');
+
+  // --- Pressure Tab States ---
+  const [selectedPressureCol, setSelectedPressureCol] = useState('');
 
   // --- Scatter Analysis States ---
   const [scatterX, setScatterX] = useState('');
@@ -42,168 +51,153 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
   const [generatedScatterConfig, setGeneratedScatterConfig] = useState(null);
 
   // --- Additional Metrics States ---
-  const [selectedAdditionalMetric, setSelectedAdditionalMetric] = useState('');
+  const [selectedAdditionalCol, setSelectedAdditionalCol] = useState('');
 
-  // Extract keys and metadata dynamically from the dataset (Requirement 4)
+  // Extract keys and metadata dynamically from the rawRowData of dataset records
   const datasetMeta = useMemo(() => {
     if (!timeseriesData || timeseriesData.length === 0) {
       return {
         count: 0,
         startDate: null,
         endDate: null,
-        speedKeys: [],
-        directionKeys: [],
-        additionalKeys: [],
-        allMetrics: [],
+        windSpeedCols: [],
+        windDirectionCols: [],
+        temperatureCols: [],
+        humidityCols: [],
+        pressureCols: [],
+        additionalCols: [],
+        allMetricCols: [],
       };
     }
 
     const firstRow = timeseriesData[0];
     const rawKeys = firstRow.rawRowData ? Object.keys(firstRow.rawRowData) : [];
 
-    // Helper normalization checks
-    const normalize = (key) => key.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const isSpeed = (key) => {
-      const norm = normalize(key);
-      return norm.includes('windspeed') || norm.includes('avgms') || norm.includes('speed');
-    };
-    const isDirection = (key) => {
-      const norm = normalize(key);
-      return norm.includes('winddirection') || norm.includes('wv') || norm.includes('direction');
-    };
-    const isTime = (key) => {
-      const norm = normalize(key);
-      return norm.includes('timestamp') || norm.includes('datetime') || norm === 'date' || norm === 'time';
-    };
+    const windSpeedCols = [];
+    const windDirectionCols = [];
+    const temperatureCols = [];
+    const humidityCols = [];
+    const pressureCols = [];
+    const additionalCols = [];
 
-    // Extract dynamic keys from database document maps
-    const speedKeys = new Set();
-    const directionKeys = new Set();
-
-    timeseriesData.forEach((row) => {
-      if (row.windSpeeds) {
-        Object.keys(row.windSpeeds).forEach((k) => speedKeys.add(k));
+    rawKeys.forEach((key) => {
+      const lowerKey = key.toLowerCase();
+      // Skip date/time columns
+      if (lowerKey.includes('date') || lowerKey.includes('time') || lowerKey === 'timestamp') {
+        return;
       }
-      if (row.windDirections) {
-        Object.keys(row.windDirections).forEach((k) => directionKeys.add(k));
+
+      if (key.includes('[m/s]')) {
+        windSpeedCols.push(key);
+      } else if (key.includes('[°]')) {
+        windDirectionCols.push(key);
+      } else if (key.includes('[°C]')) {
+        temperatureCols.push(key);
+      } else if (key.includes('[%]')) {
+        humidityCols.push(key);
+      } else if (key.includes('[mbar]')) {
+        pressureCols.push(key);
+      } else {
+        additionalCols.push(key);
       }
     });
 
-    const speedKeysArr = Array.from(speedKeys);
-    const directionKeysArr = Array.from(directionKeys);
-
-    // Filter additional metrics from CSV columns stored in rawRowData (Requirement 3 & 9)
-    const excludedBaseKeys = ['humidity', 'temperature', 'timestamp', '_id', 'createdAt', 'updatedAt', '__v'];
-    const additionalKeys = rawKeys.filter((key) => {
-      if (isTime(key)) return false;
-      if (isSpeed(key) || isDirection(key)) return false;
-      
-      const normKey = normalize(key);
-      if (normKey === 'temp5mc' || normKey === 'hum5m' || normKey === 'temperature' || normKey === 'humidity') {
-        return false;
-      }
-      return !excludedBaseKeys.includes(key);
-    });
-
-    // Combined list of all metric options for scatter dropdowns
-    const allMetrics = [];
-    speedKeysArr.forEach((k) => allMetrics.push({ value: `speed.${k}`, label: formatMetricLabel(k) }));
-    directionKeysArr.forEach((k) => allMetrics.push({ value: `direction.${k}`, label: formatMetricLabel(k) }));
-    
-    // Check if temperature and humidity exist in database
-    const temperatureExists = timeseriesData.some(d => d.temperature !== undefined && d.temperature !== null);
-    const humidityExists = timeseriesData.some(d => d.humidity !== undefined && d.humidity !== null);
-
-    if (temperatureExists) {
-      allMetrics.push({ value: 'temperature', label: 'Temperature' });
-    }
-    if (humidityExists) {
-      allMetrics.push({ value: 'humidity', label: 'Humidity' });
-    }
-    additionalKeys.forEach((k) => allMetrics.push({ value: `additional.${k}`, label: k }));
+    const allMetricCols = [
+      ...windSpeedCols,
+      ...windDirectionCols,
+      ...temperatureCols,
+      ...humidityCols,
+      ...pressureCols,
+      ...additionalCols,
+    ];
 
     return {
       count: timeseriesData.length,
       startDate: timeseriesData[0]?.timestamp,
       endDate: timeseriesData[timeseriesData.length - 1]?.timestamp,
-      speedKeys: speedKeysArr,
-      directionKeys: directionKeysArr,
-      additionalKeys,
-      allMetrics,
+      windSpeedCols,
+      windDirectionCols,
+      temperatureCols,
+      humidityCols,
+      pressureCols,
+      additionalCols,
+      allMetricCols,
     };
   }, [timeseriesData]);
 
-  // Synchronize speed check-state dynamically when dataset updates (Requirement 5)
+  // Synchronize speed check-state dynamically when dataset updates (selecting first column by default)
   useEffect(() => {
-    if (datasetMeta.speedKeys.length > 0) {
+    if (datasetMeta.windSpeedCols.length > 0) {
       const initial = {};
-      datasetMeta.speedKeys.forEach((key, index) => {
-        // Default select the first two heights
-        initial[key] = index < 2;
+      datasetMeta.windSpeedCols.forEach((col, index) => {
+        initial[col] = index === 0;
       });
-      setSelectedHeights(initial);
+      setSelectedSpeedCols(initial);
     }
-  }, [datasetMeta.speedKeys]);
+  }, [datasetMeta.windSpeedCols]);
 
   // Synchronize wind direction check-state dynamically when dataset updates
   useEffect(() => {
-    if (datasetMeta.directionKeys.length > 0) {
+    if (datasetMeta.windDirectionCols.length > 0) {
       const initial = {};
-      datasetMeta.directionKeys.forEach((key, index) => {
-        // Default select the first direction height
-        initial[key] = index === 0;
+      datasetMeta.windDirectionCols.forEach((col, index) => {
+        initial[col] = index === 0;
       });
-      setSelectedDirections(initial);
+      setSelectedDirectionCols(initial);
     }
-  }, [datasetMeta.directionKeys]);
+  }, [datasetMeta.windDirectionCols]);
 
-  // Sync default additional metrics
+  // Sync Temperature, Humidity, Pressure and Additional columns
   useEffect(() => {
-    if (datasetMeta.additionalKeys.length > 0 && !selectedAdditionalMetric) {
-      setSelectedAdditionalMetric(datasetMeta.additionalKeys[0]);
+    if (datasetMeta.temperatureCols.length > 0) {
+      setSelectedTempCol(datasetMeta.temperatureCols[0]);
     }
-    if (datasetMeta.allMetrics.length >= 2 && !scatterX) {
-      setScatterX(datasetMeta.allMetrics[0]?.value);
-      setScatterY(datasetMeta.allMetrics[1]?.value);
+    if (datasetMeta.humidityCols.length > 0) {
+      setSelectedHumidityCol(datasetMeta.humidityCols[0]);
     }
-  }, [datasetMeta, selectedAdditionalMetric, scatterX]);
+    if (datasetMeta.pressureCols.length > 0) {
+      setSelectedPressureCol(datasetMeta.pressureCols[0]);
+    }
+    if (datasetMeta.additionalCols.length > 0) {
+      setSelectedAdditionalCol(datasetMeta.additionalCols[0]);
+    }
+  }, [datasetMeta.temperatureCols, datasetMeta.humidityCols, datasetMeta.pressureCols, datasetMeta.additionalCols]);
 
-  // Print telemetry debugging logs to console on metric/tab selections (Requirement 11)
+  // Sync Scatter inputs
+  useEffect(() => {
+    if (datasetMeta.allMetricCols.length >= 2 && !scatterX) {
+      setScatterX(datasetMeta.allMetricCols[0]);
+      setScatterY(datasetMeta.allMetricCols[1]);
+    }
+  }, [datasetMeta.allMetricCols, scatterX]);
+
+  // Print telemetry debugging logs to console on metric/tab selections
   useEffect(() => {
     let selectedText = '';
     if (activeTab === 0) {
-      selectedText = `Speeds: ${Object.keys(selectedHeights).filter(k => selectedHeights[k]).join(', ')}`;
+      selectedText = `Speeds: ${Object.keys(selectedSpeedCols).filter(k => selectedSpeedCols[k]).join(', ')}`;
     } else if (activeTab === 1) {
-      selectedText = `Directions: ${Object.keys(selectedDirections).filter(k => selectedDirections[k]).join(', ')}`;
+      selectedText = `Directions: ${Object.keys(selectedDirectionCols).filter(k => selectedDirectionCols[k]).join(', ')}`;
     } else if (activeTab === 2) {
-      selectedText = 'Temperature';
+      selectedText = `Temperature: ${selectedTempCol}`;
     } else if (activeTab === 3) {
-      selectedText = 'Humidity';
+      selectedText = `Humidity: ${selectedHumidityCol}`;
     } else if (activeTab === 4) {
+      selectedText = `Pressure: ${selectedPressureCol}`;
+    } else if (activeTab === 5) {
       selectedText = generatedScatterConfig 
         ? `Scatter [X: ${generatedScatterConfig.xKey}, Y: ${generatedScatterConfig.yKey}]`
         : 'Scatter config pending';
-    } else if (activeTab === 5) {
-      selectedText = `Additional: ${selectedAdditionalMetric}`;
+    } else if (activeTab === 6) {
+      selectedText = `Additional: ${selectedAdditionalCol}`;
     }
 
     console.log('--- Visualization State Selection ---');
     console.log(`Active Tab: ${activeTab}`);
-    console.log(`Discovered speed keys: ${datasetMeta.speedKeys.join(', ')}`);
-    console.log(`Discovered direction keys: ${datasetMeta.directionKeys.join(', ')}`);
-    console.log(`Discovered additional keys: ${datasetMeta.additionalKeys.join(', ')}`);
+    console.log(`Discovered speed columns: ${datasetMeta.windSpeedCols.join(', ')}`);
+    console.log(`Discovered direction columns: ${datasetMeta.windDirectionCols.join(', ')}`);
     console.log(`Selected Metric: ${selectedText}`);
-  }, [activeTab, selectedHeights, selectedDirections, selectedAdditionalMetric, generatedScatterConfig, datasetMeta]);
-
-  // Clean metric label formatter
-  function formatMetricLabel(key) {
-    return key
-      .replace(/([A-Z])/g, ' $1')
-      .replace(/^./, (str) => str.toUpperCase())
-      .replace('windSpeed', 'Wind Speed ')
-      .replace('windDirection', 'Wind Direction ')
-      .trim();
-  }
+  }, [activeTab, selectedSpeedCols, selectedDirectionCols, selectedTempCol, selectedHumidityCol, selectedPressureCol, selectedAdditionalCol, generatedScatterConfig, datasetMeta]);
 
   // --- Linear Regression Helper for Scatter Analysis ---
   const regressionLine = useMemo(() => {
@@ -213,25 +207,9 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
     const { xKey, yKey } = generatedScatterConfig;
 
-    const getValue = (row, compositeKey) => {
-      if (compositeKey.startsWith('speed.')) {
-        return row.windSpeeds?.[compositeKey.replace('speed.', '')];
-      }
-      if (compositeKey.startsWith('direction.')) {
-        return row.windDirections?.[compositeKey.replace('direction.', '')];
-      }
-      if (compositeKey === 'temperature') {
-        return row.temperature;
-      }
-      if (compositeKey === 'humidity') {
-        return row.humidity;
-      }
-      if (compositeKey.startsWith('additional.')) {
-        const rawKey = compositeKey.replace('additional.', '');
-        const val = row.rawRowData?.[rawKey];
-        return val !== undefined && val !== null ? parseFloat(val) : undefined;
-      }
-      return undefined;
+    const getValue = (row, key) => {
+      const val = row.rawRowData?.[key];
+      return val !== undefined && val !== null ? parseFloat(val) : undefined;
     };
 
     const xVals = [];
@@ -273,6 +251,61 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       intercept,
     };
   }, [timeseriesData, generatedScatterConfig, showTrendLine]);
+
+  // --- Dynamic Selection Lists & Stats Computation ---
+  const activeMetrics = useMemo(() => {
+    if (activeTab === 0) {
+      return Object.keys(selectedSpeedCols).filter(col => selectedSpeedCols[col]);
+    }
+    if (activeTab === 1) {
+      return Object.keys(selectedDirectionCols).filter(col => selectedDirectionCols[col]);
+    }
+    if (activeTab === 2) {
+      return selectedTempCol ? [selectedTempCol] : [];
+    }
+    if (activeTab === 3) {
+      return selectedHumidityCol ? [selectedHumidityCol] : [];
+    }
+    if (activeTab === 4) {
+      return selectedPressureCol ? [selectedPressureCol] : [];
+    }
+    if (activeTab === 6) {
+      return selectedAdditionalCol ? [selectedAdditionalCol] : [];
+    }
+    return [];
+  }, [activeTab, selectedSpeedCols, selectedDirectionCols, selectedTempCol, selectedHumidityCol, selectedPressureCol, selectedAdditionalCol]);
+
+  const metricsStats = useMemo(() => {
+    if (!timeseriesData || timeseriesData.length === 0 || activeMetrics.length === 0) {
+      return {};
+    }
+
+    const stats = {};
+    activeMetrics.forEach((metric) => {
+      let min = Infinity;
+      let max = -Infinity;
+      let hasValue = false;
+
+      timeseriesData.forEach((row) => {
+        const val = row.rawRowData?.[metric];
+        if (val !== undefined && val !== null && val !== '') {
+          const num = Number(val);
+          if (Number.isFinite(num)) {
+            if (num < min) min = num;
+            if (num > max) max = num;
+            hasValue = true;
+          }
+        }
+      });
+
+      stats[metric] = {
+        min: hasValue ? parseFloat(min.toFixed(2)) : 'N/A',
+        max: hasValue ? parseFloat(max.toFixed(2)) : 'N/A',
+      };
+    });
+
+    return stats;
+  }, [timeseriesData, activeMetrics]);
 
   // --- Plotly Themes Configuration ---
   const plotlyLayoutDefaults = useMemo(() => {
@@ -347,6 +380,8 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     );
   };
 
+  const CHART_COLORS = ['#6ee7f9', '#8b5cf6', '#34d399', '#f59e0b', '#38bdf8', '#fb7185', '#ec4899', '#10b981'];
+
   // --- Rendering Chart Core Logic ---
   const renderChart = () => {
     if (isLoading) {
@@ -390,28 +425,23 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
     // TAB 0: Wind Speed overlay
     if (activeTab === 0) {
-      const traces = [];
-      const colors = {
-        windSpeed100m: '#6ee7f9',
-        windSpeed80m: '#8b5cf6',
-        windSpeed50m: '#34d399',
-        windSpeed20m: '#f59e0b',
-      };
-
-      const activeKeys = Object.keys(selectedHeights).filter(k => selectedHeights[k]);
+      const activeKeys = Object.keys(selectedSpeedCols).filter(k => selectedSpeedCols[k]);
 
       if (activeKeys.length === 0) {
         return (
           <Box className={styles.emptySelectionState}>
-            <Typography variant="body1">Select at least one speed height level above to visualize</Typography>
+            <Typography variant="body1">Select at least one speed column above to visualize</Typography>
           </Box>
         );
       }
 
-      // Collect data and check for emptiness
       let allTracesEmpty = true;
-      activeKeys.forEach((key) => {
-        const values = timeseriesData.map((d) => d.windSpeeds?.[key]);
+      const traces = [];
+      activeKeys.forEach((key, idx) => {
+        const values = timeseriesData.map((d) => {
+          const rawVal = d.rawRowData?.[key];
+          return rawVal !== undefined && rawVal !== null ? parseFloat(rawVal) : null;
+        });
         if (!isDataEmpty(values)) {
           allTracesEmpty = false;
         }
@@ -420,14 +450,14 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
           y: values,
           type: 'scatter',
           mode: 'lines',
-          name: formatMetricLabel(key),
-          line: { color: colors[key] || '#38bdf8', width: 2 },
-          hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${formatMetricLabel(key)}:</b> %{y:.2f} m/s<extra></extra>`,
+          name: key,
+          line: { color: CHART_COLORS[idx % CHART_COLORS.length], width: 2 },
+          hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${key}:</b> %{y:.2f} m/s<extra></extra>`,
         });
       });
 
       if (allTracesEmpty) {
-        return renderNoDataWarning(activeKeys.map(formatMetricLabel).join(' / '));
+        return renderNoDataWarning(activeKeys.join(' / '));
       }
 
       return (
@@ -451,22 +481,23 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
     // TAB 1: Wind Direction
     if (activeTab === 1) {
-      const activeKeys = Object.keys(selectedDirections).filter(k => selectedDirections[k]);
+      const activeKeys = Object.keys(selectedDirectionCols).filter(k => selectedDirectionCols[k]);
 
       if (activeKeys.length === 0) {
         return (
           <Box className={styles.emptySelectionState}>
-            <Typography variant="body1">Select at least one wind direction height above to visualize</Typography>
+            <Typography variant="body1">Select at least one wind direction column above to visualize</Typography>
           </Box>
         );
       }
 
       let allTracesEmpty = true;
       const traces = [];
-      const colors = ['#38bdf8', '#fb7185', '#34d399', '#f59e0b'];
-
       activeKeys.forEach((key, idx) => {
-        const values = timeseriesData.map((d) => d.windDirections?.[key]);
+        const values = timeseriesData.map((d) => {
+          const rawVal = d.rawRowData?.[key];
+          return rawVal !== undefined && rawVal !== null ? parseFloat(rawVal) : null;
+        });
         if (!isDataEmpty(values)) {
           allTracesEmpty = false;
         }
@@ -475,14 +506,14 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
           y: values,
           type: 'scatter',
           mode: 'markers',
-          name: formatMetricLabel(key),
-          marker: { color: colors[idx % colors.length], size: 5.5, opacity: 0.8 },
-          hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${formatMetricLabel(key)}:</b> %{y:.1f}°<extra></extra>`,
+          name: key,
+          marker: { color: CHART_COLORS[idx % CHART_COLORS.length], size: 5.5, opacity: 0.8 },
+          hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${key}:</b> %{y:.1f}°<extra></extra>`,
         });
       });
 
       if (allTracesEmpty) {
-        return renderNoDataWarning(activeKeys.map(formatMetricLabel).join(' / '));
+        return renderNoDataWarning(activeKeys.join(' / '));
       }
 
       return (
@@ -507,10 +538,16 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
     // TAB 2: Temperature
     if (activeTab === 2) {
-      const values = timeseriesData.map((d) => d.temperature);
+      if (!selectedTempCol) {
+        return renderNoDataWarning('Temperature');
+      }
+      const values = timeseriesData.map((d) => {
+        const rawVal = d.rawRowData?.[selectedTempCol];
+        return rawVal !== undefined && rawVal !== null ? parseFloat(rawVal) : null;
+      });
       
       if (isDataEmpty(values)) {
-        return renderNoDataWarning('Temperature');
+        return renderNoDataWarning(selectedTempCol);
       }
 
       const trace = {
@@ -518,11 +555,11 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
         y: values,
         type: 'scatter',
         mode: 'lines',
-        name: 'Temperature',
+        name: selectedTempCol,
         line: { color: '#f59e0b', width: 2 },
         fill: 'tozeroy',
         fillcolor: 'rgba(245, 158, 11, 0.04)',
-        hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>Temp:</b> %{y:.2f} °C<extra></extra>`,
+        hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${selectedTempCol}:</b> %{y:.2f} °C<extra></extra>`,
       };
 
       return (
@@ -533,7 +570,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
               ...plotlyLayoutDefaults,
               yaxis: {
                 ...plotlyLayoutDefaults.yaxis,
-                title: { text: 'Temperature (°C)', font: { size: 12 } },
+                title: { text: selectedTempCol, font: { size: 12 } },
               },
             }}
             config={config}
@@ -546,10 +583,16 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
     // TAB 3: Humidity
     if (activeTab === 3) {
-      const values = timeseriesData.map((d) => d.humidity);
+      if (!selectedHumidityCol) {
+        return renderNoDataWarning('Humidity');
+      }
+      const values = timeseriesData.map((d) => {
+        const rawVal = d.rawRowData?.[selectedHumidityCol];
+        return rawVal !== undefined && rawVal !== null ? parseFloat(rawVal) : null;
+      });
 
       if (isDataEmpty(values)) {
-        return renderNoDataWarning('Humidity');
+        return renderNoDataWarning(selectedHumidityCol);
       }
 
       const trace = {
@@ -557,11 +600,11 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
         y: values,
         type: 'scatter',
         mode: 'lines',
-        name: 'Humidity',
+        name: selectedHumidityCol,
         line: { color: '#22d3ee', width: 2 },
         fill: 'tozeroy',
         fillcolor: 'rgba(34, 211, 238, 0.04)',
-        hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>Humidity:</b> %{y:.2f}%<extra></extra>`,
+        hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${selectedHumidityCol}:</b> %{y:.2f}%<extra></extra>`,
       };
 
       return (
@@ -572,7 +615,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
               ...plotlyLayoutDefaults,
               yaxis: {
                 ...plotlyLayoutDefaults.yaxis,
-                title: { text: 'Humidity (%)', font: { size: 12 } },
+                title: { text: selectedHumidityCol, font: { size: 12 } },
                 range: [0, 100],
               },
             }}
@@ -584,8 +627,53 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    // TAB 4: Scatter Analysis
+    // TAB 4: Pressure
     if (activeTab === 4) {
+      if (!selectedPressureCol) {
+        return renderNoDataWarning('Pressure');
+      }
+      const values = timeseriesData.map((d) => {
+        const rawVal = d.rawRowData?.[selectedPressureCol];
+        return rawVal !== undefined && rawVal !== null ? parseFloat(rawVal) : null;
+      });
+
+      if (isDataEmpty(values)) {
+        return renderNoDataWarning(selectedPressureCol);
+      }
+
+      const trace = {
+        x: timestamps,
+        y: values,
+        type: 'scatter',
+        mode: 'lines',
+        name: selectedPressureCol,
+        line: { color: '#ec4899', width: 2 },
+        fill: 'tozeroy',
+        fillcolor: 'rgba(236, 72, 153, 0.04)',
+        hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${selectedPressureCol}:</b> %{y:.2f} mbar<extra></extra>`,
+      };
+
+      return (
+        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={680} sx={{ borderRadius: '16px' }} />}>
+          <LazyPlot
+            data={[trace]}
+            layout={{
+              ...plotlyLayoutDefaults,
+              yaxis: {
+                ...plotlyLayoutDefaults.yaxis,
+                title: { text: selectedPressureCol, font: { size: 12 } },
+              },
+            }}
+            config={config}
+            useResizeHandler
+            style={{ width: '100%', height: '680px' }}
+          />
+        </Suspense>
+      );
+    }
+
+    // TAB 5: Scatter Analysis
+    if (activeTab === 5) {
       if (!generatedScatterConfig) {
         return (
           <Box className={styles.emptySelectionState}>
@@ -597,25 +685,9 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
       const { xKey, yKey } = generatedScatterConfig;
 
-      const getValue = (row, compositeKey) => {
-        if (compositeKey.startsWith('speed.')) {
-          return row.windSpeeds?.[compositeKey.replace('speed.', '')];
-        }
-        if (compositeKey.startsWith('direction.')) {
-          return row.windDirections?.[compositeKey.replace('direction.', '')];
-        }
-        if (compositeKey === 'temperature') {
-          return row.temperature;
-        }
-        if (compositeKey === 'humidity') {
-          return row.humidity;
-        }
-        if (compositeKey.startsWith('additional.')) {
-          const rawKey = compositeKey.replace('additional.', '');
-          const val = row.rawRowData?.[rawKey];
-          return val !== undefined && val !== null ? parseFloat(val) : undefined;
-        }
-        return undefined;
+      const getValue = (row, key) => {
+        const val = row.rawRowData?.[key];
+        return val !== undefined && val !== null ? parseFloat(val) : undefined;
       };
 
       const xData = [];
@@ -629,7 +701,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
           xData.push(xv);
           yData.push(yv);
           const dateStr = new Date(row.timestamp).toLocaleString();
-          hoverTexts.push(`Time: ${dateStr}<br>X: ${xv.toFixed(2)}<br>Y: ${yv.toFixed(2)}`);
+          hoverTexts.push(`Time: ${dateStr}<br>${xKey}: ${xv.toFixed(2)}<br>${yKey}: ${yv.toFixed(2)}`);
         }
       });
 
@@ -665,11 +737,6 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
         });
       }
 
-      const getCleanLabel = (compKey) => {
-        const item = datasetMeta.allMetrics.find((m) => m.value === compKey);
-        return item ? item.label : compKey;
-      };
-
       return (
         <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={680} sx={{ borderRadius: '16px' }} />}>
           <LazyPlot
@@ -678,11 +745,11 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
               ...plotlyLayoutDefaults,
               xaxis: {
                 ...plotlyLayoutDefaults.xaxis,
-                title: { text: getCleanLabel(xKey), font: { size: 12 } },
+                title: { text: xKey, font: { size: 12 } },
               },
               yaxis: {
                 ...plotlyLayoutDefaults.yaxis,
-                title: { text: getCleanLabel(yKey), font: { size: 12 } },
+                title: { text: yKey, font: { size: 12 } },
               },
             }}
             config={{
@@ -696,9 +763,9 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    // TAB 5: Additional Metrics
-    if (activeTab === 5) {
-      if (!selectedAdditionalMetric) {
+    // TAB 6: Additional Metrics
+    if (activeTab === 6) {
+      if (!selectedAdditionalCol) {
         return (
           <Box className={styles.emptySelectionState}>
             <Typography variant="body1">No additional columns detected in the dataset</Typography>
@@ -707,12 +774,12 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       }
 
       const values = timeseriesData.map((d) => {
-        const rawVal = d.rawRowData?.[selectedAdditionalMetric];
+        const rawVal = d.rawRowData?.[selectedAdditionalCol];
         return rawVal !== undefined && rawVal !== null ? parseFloat(rawVal) : null;
       });
 
       if (isDataEmpty(values)) {
-        return renderNoDataWarning(selectedAdditionalMetric);
+        return renderNoDataWarning(selectedAdditionalCol);
       }
 
       const trace = {
@@ -720,11 +787,11 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
         y: values,
         type: 'scatter',
         mode: 'lines',
-        name: selectedAdditionalMetric,
+        name: selectedAdditionalCol,
         line: { color: '#8b5cf6', width: 2 },
         fill: 'tozeroy',
         fillcolor: 'rgba(139, 92, 246, 0.04)',
-        hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${selectedAdditionalMetric}:</b> %{y:.2f}<extra></extra>`,
+        hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${selectedAdditionalCol}:</b> %{y:.2f}<extra></extra>`,
       };
 
       return (
@@ -735,7 +802,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
               ...plotlyLayoutDefaults,
               yaxis: {
                 ...plotlyLayoutDefaults.yaxis,
-                title: { text: selectedAdditionalMetric, font: { size: 12 } },
+                title: { text: selectedAdditionalCol, font: { size: 12 } },
               },
             }}
             config={config}
@@ -755,25 +822,25 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       return (
         <Paper className={styles.horizontalControlBar} elevation={0}>
           <Typography variant="subtitle2" className={styles.controlTitle}>
-            Select Heights overlay
+            Select Wind Speed Metrics
           </Typography>
           <FormGroup row sx={{ gap: 2 }}>
-            {datasetMeta.speedKeys.map((key) => (
+            {datasetMeta.windSpeedCols.map((col) => (
               <FormControlLabel
-                key={key}
+                key={col}
                 control={
                   <Checkbox
-                    checked={Boolean(selectedHeights[key])}
+                    checked={Boolean(selectedSpeedCols[col])}
                     onChange={(e) =>
-                      setSelectedHeights((prev) => ({
+                      setSelectedSpeedCols((prev) => ({
                         ...prev,
-                        [key]: e.target.checked,
+                        [col]: e.target.checked,
                       }))
                     }
                     sx={{ color: 'rgba(255,255,255,0.2)', '&.Mui-checked': { color: '#6ee7f9' } }}
                   />
                 }
-                label={formatMetricLabel(key)}
+                label={col}
                 sx={{ color: '#eff6ff' }}
               />
             ))}
@@ -786,25 +853,25 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       return (
         <Paper className={styles.horizontalControlBar} elevation={0}>
           <Typography variant="subtitle2" className={styles.controlTitle}>
-            Select Directions overlay
+            Select Wind Direction Metrics
           </Typography>
           <FormGroup row sx={{ gap: 2 }}>
-            {datasetMeta.directionKeys.map((key) => (
+            {datasetMeta.windDirectionCols.map((col) => (
               <FormControlLabel
-                key={key}
+                key={col}
                 control={
                   <Checkbox
-                    checked={Boolean(selectedDirections[key])}
+                    checked={Boolean(selectedDirectionCols[col])}
                     onChange={(e) =>
-                      setSelectedDirections((prev) => ({
+                      setSelectedDirectionCols((prev) => ({
                         ...prev,
-                        [key]: e.target.checked,
+                        [col]: e.target.checked,
                       }))
                     }
                     sx={{ color: 'rgba(255,255,255,0.2)', '&.Mui-checked': { color: '#38bdf8' } }}
                   />
                 }
-                label={formatMetricLabel(key)}
+                label={col}
                 sx={{ color: '#eff6ff' }}
               />
             ))}
@@ -813,7 +880,70 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
+    if (activeTab === 2) {
+      return (
+        <Paper className={styles.horizontalControlBar} elevation={0}>
+          <Typography variant="subtitle2" className={styles.controlTitle}>
+            Select Temperature Metric
+          </Typography>
+          <Box className={styles.metricChipsContainer}>
+            {datasetMeta.temperatureCols.map((col) => (
+              <Chip
+                key={col}
+                label={col}
+                onClick={() => setSelectedTempCol(col)}
+                className={`${styles.metricChip} ${selectedTempCol === col ? styles.metricChipActive : ''}`}
+                variant="outlined"
+              />
+            ))}
+          </Box>
+        </Paper>
+      );
+    }
+
+    if (activeTab === 3) {
+      return (
+        <Paper className={styles.horizontalControlBar} elevation={0}>
+          <Typography variant="subtitle2" className={styles.controlTitle}>
+            Select Humidity Metric
+          </Typography>
+          <Box className={styles.metricChipsContainer}>
+            {datasetMeta.humidityCols.map((col) => (
+              <Chip
+                key={col}
+                label={col}
+                onClick={() => setSelectedHumidityCol(col)}
+                className={`${styles.metricChip} ${selectedHumidityCol === col ? styles.metricChipActive : ''}`}
+                variant="outlined"
+              />
+            ))}
+          </Box>
+        </Paper>
+      );
+    }
+
     if (activeTab === 4) {
+      return (
+        <Paper className={styles.horizontalControlBar} elevation={0}>
+          <Typography variant="subtitle2" className={styles.controlTitle}>
+            Select Pressure Metric
+          </Typography>
+          <Box className={styles.metricChipsContainer}>
+            {datasetMeta.pressureCols.map((col) => (
+              <Chip
+                key={col}
+                label={col}
+                onClick={() => setSelectedPressureCol(col)}
+                className={`${styles.metricChip} ${selectedPressureCol === col ? styles.metricChipActive : ''}`}
+                variant="outlined"
+              />
+            ))}
+          </Box>
+        </Paper>
+      );
+    }
+
+    if (activeTab === 5) {
       return (
         <Paper className={styles.horizontalControlBar} elevation={0}>
           <Typography variant="subtitle2" className={styles.controlTitle}>
@@ -829,9 +959,9 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
                 onChange={(e) => setScatterX(e.target.value)}
                 sx={{ borderRadius: '10px' }}
               >
-                {datasetMeta.allMetrics.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value} disabled={opt.value === scatterY}>
-                    {opt.label}
+                {datasetMeta.allMetricCols.map((col) => (
+                  <MenuItem key={col} value={col} disabled={col === scatterY}>
+                    {col}
                   </MenuItem>
                 ))}
               </Select>
@@ -846,9 +976,9 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
                 onChange={(e) => setScatterY(e.target.value)}
                 sx={{ borderRadius: '10px' }}
               >
-                {datasetMeta.allMetrics.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value} disabled={opt.value === scatterX}>
-                    {opt.label}
+                {datasetMeta.allMetricCols.map((col) => (
+                  <MenuItem key={col} value={col} disabled={col === scatterX}>
+                    {col}
                   </MenuItem>
                 ))}
               </Select>
@@ -881,19 +1011,19 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    if (activeTab === 5 && datasetMeta.additionalKeys.length > 0) {
+    if (activeTab === 6 && datasetMeta.additionalCols.length > 0) {
       return (
         <Paper className={styles.horizontalControlBar} elevation={0}>
           <Typography variant="subtitle2" className={styles.controlTitle}>
             Select Dataset Column Metric
           </Typography>
           <Box className={styles.metricChipsContainer}>
-            {datasetMeta.additionalKeys.map((key) => (
+            {datasetMeta.additionalCols.map((col) => (
               <Chip
-                key={key}
-                label={key}
-                onClick={() => setSelectedAdditionalMetric(key)}
-                className={`${styles.metricChip} ${selectedAdditionalMetric === key ? styles.metricChipActive : ''}`}
+                key={col}
+                label={col}
+                onClick={() => setSelectedAdditionalCol(col)}
+                className={`${styles.metricChip} ${selectedAdditionalCol === col ? styles.metricChipActive : ''}`}
                 variant="outlined"
               />
             ))}
@@ -905,6 +1035,41 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     return null;
   };
 
+  const renderStatsCards = () => {
+    if (!timeseriesData || timeseriesData.length === 0 || activeMetrics.length === 0) return null;
+
+    return (
+      <Box className={styles.statsCardsContainer}>
+        <Stack direction="row" spacing={2.5} useFlexGap flexWrap="wrap" className={styles.statsGrid}>
+          {activeMetrics.map((metric) => {
+            const stat = metricsStats[metric] || { min: 'N/A', max: 'N/A' };
+            return (
+              <Paper key={metric} className={styles.statCard} elevation={0}>
+                <Typography className={styles.statCardMetricName}>
+                  {metric}
+                </Typography>
+                <Stack direction="row" spacing={3} sx={{ mt: 1 }}>
+                  <Box>
+                    <Typography className={styles.statLabel}>Min</Typography>
+                    <Typography className={styles.statValue}>
+                      {typeof stat.min === 'number' ? stat.min.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : stat.min}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography className={styles.statLabel}>Max</Typography>
+                    <Typography className={styles.statValue}>
+                      {typeof stat.max === 'number' ? stat.max.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : stat.max}
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Paper>
+            );
+          })}
+        </Stack>
+      </Box>
+    );
+  };
+
   return (
     <Paper className={styles.workspace} elevation={0}>
       <Stack spacing={3.2}>
@@ -912,20 +1077,22 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2} alignItems="center">
           <Box>
             <Typography variant="h5" className={styles.title}>
-              {activeTab === 0 && 'Wind Speed Heights overlay'}
+              {activeTab === 0 && 'Wind Speed Timeline'}
               {activeTab === 1 && 'Wind Direction Timeline'}
               {activeTab === 2 && 'Ambient Temperature Timeline'}
               {activeTab === 3 && 'Relative Humidity Timeline'}
-              {activeTab === 4 && 'Correlation Scatter Workspace'}
-              {activeTab === 5 && 'Dynamic Dataset Column Explorer'}
+              {activeTab === 4 && 'Atmospheric Pressure Timeline'}
+              {activeTab === 5 && 'Correlation Scatter Workspace'}
+              {activeTab === 6 && 'Dynamic Dataset Column Explorer'}
             </Typography>
             <Typography variant="body2" className={styles.subtitle}>
-              {activeTab === 0 && 'Track and overlay wind speeds across multiple heights (100m, 80m, 50m, 20m) simultaneously.'}
+              {activeTab === 0 && 'Track and overlay wind speeds across multiple heights simultaneously.'}
               {activeTab === 1 && 'Scatter timeline of wind direction angles (degrees) representing orientation currents.'}
               {activeTab === 2 && 'Timeline tracing ambient temperature variations in Celsius.'}
               {activeTab === 3 && 'Monitoring relative humidity percentages over the dataset observation window.'}
-              {activeTab === 4 && 'Explore correlations between any pair of metrics. Includes customizable linear regression trendline overlay.'}
-              {activeTab === 5 && 'Plot and visualize remaining columns in the dataset CSV dynamically.'}
+              {activeTab === 4 && 'Timeline tracking barometric air pressure measurements in millibars (mbar).'}
+              {activeTab === 5 && 'Explore correlations between any pair of metrics. Includes customizable linear regression trendline overlay.'}
+              {activeTab === 6 && 'Plot and visualize remaining columns in the dataset CSV dynamically.'}
             </Typography>
           </Box>
 
@@ -952,6 +1119,9 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
         {/* Tab-Specific Control Panels - Full Width */}
         {renderControlPanel()}
+
+        {/* Dynamic statistics cards displaying Min/Max above the chart */}
+        {renderStatsCards()}
 
         {/* 100% Full-Width Chart Container (Requirement 6 & 8) */}
         <Box className={styles.chartWrapper}>

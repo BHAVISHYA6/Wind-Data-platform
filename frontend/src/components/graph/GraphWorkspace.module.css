@@ -232,3 +232,58 @@
   font-weight: 700;
   border-radius: 4px;
 }
+
+/* Statistics Telemetry Cards */
+.statsCardsContainer {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.statsGrid {
+  width: 100%;
+}
+
+.statCard {
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid rgba(148, 163, 184, 0.1) !important;
+  border-radius: 14px !important;
+  padding: 12px 18px !important;
+  min-width: 180px;
+  flex: 1;
+  box-sizing: border-box;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15) !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.statCard:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(110, 231, 249, 0.25) !important;
+  transform: translateY(-2px);
+}
+
+.statCardMetricName {
+  font-size: 0.78rem !important;
+  font-weight: 700 !important;
+  color: #e2e8f0 !important;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  padding-bottom: 6px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.statLabel {
+  font-size: 0.65rem !important;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.4) !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.05em;
+}
+
+.statValue {
+  font-size: 1.1rem !important;
+  font-weight: 800 !important;
+  color: #6ee7f9 !important;
+  margin-top: 2px;
+}
