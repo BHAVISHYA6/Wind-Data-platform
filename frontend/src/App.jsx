@@ -21,6 +21,7 @@ import {
 export default function App() {
   const [activeTab, setActiveTab] = useState(0);
 
+  const [rawSummaryData, setRawSummaryData] = useState(null);
   const [summaryCards, setSummaryCards] = useState(defaultSummaryCards);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryError, setSummaryError] = useState('');
@@ -46,6 +47,13 @@ export default function App() {
     message: '',
   });
 
+  // Keep summary metrics cards reactively synchronized with both summary totals and timeseries details
+  useEffect(() => {
+    if (rawSummaryData) {
+      setSummaryCards(buildSummaryCards(rawSummaryData, timeseriesData));
+    }
+  }, [rawSummaryData, timeseriesData]);
+
   const showToast = useCallback(({ severity, message }) => {
     setToast({
       open: true,
@@ -65,7 +73,7 @@ export default function App() {
 
     try {
       const summaryData = await fetchSummaryAnalytics();
-      setSummaryCards(buildSummaryCards(summaryData));
+      setRawSummaryData(summaryData);
       
       const total = summaryData.totalRecords ?? 0;
       setDatasetStatus({
@@ -76,6 +84,7 @@ export default function App() {
     } catch (error) {
       const message = error?.response?.data?.error || error?.message || 'Failed to load summary analytics';
       setSummaryError(message);
+      setRawSummaryData(null);
       setSummaryCards(defaultSummaryCards);
       setDatasetStatus({
         label: 'Error loading stats',
@@ -111,6 +120,13 @@ export default function App() {
       // Fetch dynamic record count limit (e.g. 5000 records)
       const data = await fetchTimeseriesData(5000);
       setTimeseriesData(data);
+
+      // Print telemetry debugging logs to console (Requirement 11)
+      console.log('--- Timeseries API Payload Debugging ---');
+      console.log('API response fields:', Object.keys(data[0] || {}));
+      console.log('Discovered available speed metrics:', data.length > 0 && data[0].windSpeeds ? Object.keys(data[0].windSpeeds) : []);
+      console.log('Discovered available direction metrics:', data.length > 0 && data[0].windDirections ? Object.keys(data[0].windDirections) : []);
+      console.log('Discovered available raw metrics:', data.length > 0 && data[0].rawRowData ? Object.keys(data[0].rawRowData) : []);
     } catch (error) {
       const message = error?.response?.data?.error || error?.message || 'Failed to load timeseries data';
       setTimeseriesError(message);

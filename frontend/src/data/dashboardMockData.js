@@ -62,14 +62,15 @@ export const defaultSummaryCards = [
   },
 ];
 
-export const buildSummaryCards = (summaryData) => {
+export const buildSummaryCards = (summaryData, timeseriesData) => {
   if (!summaryData) {
     return defaultSummaryCards;
   }
 
-  const totalRecords = Number(summaryData.totalRecords ?? 0);
+  const validRecords = Number(summaryData.totalRecords ?? 0);
   const totalErrorLogs = Number(summaryData.totalErrorLogs ?? 0);
-  const validRecords = Math.max(totalRecords - totalErrorLogs, 0);
+  const totalRecords = validRecords + totalErrorLogs;
+  
   const avgHumidity =
     summaryData.avgHumidity === null || summaryData.avgHumidity === undefined
       ? 'N/A'
@@ -79,11 +80,37 @@ export const buildSummaryCards = (summaryData) => {
       ? 'N/A'
       : `${Number(summaryData.avgTemperature).toFixed(2)} °C`;
 
+  // Dynamically calculate average wind speed from the WindData timeseries
+  let avgWindSpeedStr = 'N/A';
+  let avgWindSpeedDelta = 'not available yet';
+  if (timeseriesData && timeseriesData.length > 0) {
+    let speedSum = 0;
+    let speedCount = 0;
+    timeseriesData.forEach((d) => {
+      if (d.windSpeeds) {
+        // Look for 100m, then 100msavgms, then first available speed metric
+        const val =
+          d.windSpeeds.windSpeed100m ??
+          d.windSpeeds['100msavgms'] ??
+          Object.values(d.windSpeeds)[0];
+        if (typeof val === 'number' && !isNaN(val)) {
+          speedSum += val;
+          speedCount++;
+        }
+      }
+    });
+    if (speedCount > 0) {
+      const avgVal = speedSum / speedCount;
+      avgWindSpeedStr = `${avgVal.toFixed(2)} m/s`;
+      avgWindSpeedDelta = `Average (100m height)`;
+    }
+  }
+
   return [
     {
       title: 'Total Records',
       value: totalRecords.toLocaleString(),
-      delta: 'from API',
+      delta: totalRecords > 0 ? 'valid + invalid logs' : '0 records',
       icon: FiActivity,
       accent: '#60a5fa',
     },
@@ -103,8 +130,8 @@ export const buildSummaryCards = (summaryData) => {
     },
     {
       title: 'Average Wind Speed',
-      value: 'N/A',
-      delta: 'not available yet',
+      value: avgWindSpeedStr,
+      delta: avgWindSpeedDelta,
       icon: FiWind,
       accent: '#38bdf8',
     },

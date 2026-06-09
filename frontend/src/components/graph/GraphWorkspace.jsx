@@ -1,4 +1,4 @@
-import { useState, useMemo, lazy, Suspense } from 'react';
+import { useState, useMemo, useEffect, lazy, Suspense } from 'react';
 import {
   Box,
   Button,
@@ -14,31 +14,26 @@ import {
   InputLabel,
   Skeleton,
   Chip,
-  Grid,
+  Alert,
 } from '@mui/material';
 import {
-  FiDownload,
-  FiMaximize2,
-  FiRefreshCw,
-  FiZoomIn,
   FiTrendingUp,
   FiDatabase,
   FiAlertCircle,
   FiPlay,
+  FiSliders,
 } from 'react-icons/fi';
 import styles from './GraphWorkspace.module.css';
 
-// Lazy load the Plotly component wrapper to ensure fast page load
+// Lazy load the Plotly component wrapper
 const LazyPlot = lazy(() => import('../chart/PlotlyWrapper'));
 
 export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, hasError }) {
   // --- Wind Speed Tab States ---
-  const [selectedHeights, setSelectedHeights] = useState({
-    windSpeed100m: true,
-    windSpeed80m: true,
-    windSpeed50m: false,
-    windSpeed20m: false,
-  });
+  const [selectedHeights, setSelectedHeights] = useState({});
+
+  // --- Wind Direction Tab States ---
+  const [selectedDirections, setSelectedDirections] = useState({});
 
   // --- Scatter Analysis States ---
   const [scatterX, setScatterX] = useState('');
@@ -49,7 +44,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
   // --- Additional Metrics States ---
   const [selectedAdditionalMetric, setSelectedAdditionalMetric] = useState('');
 
-  // Extract keys and metadata dynamically from the dataset
+  // Extract keys and metadata dynamically from the dataset (Requirement 4)
   const datasetMeta = useMemo(() => {
     if (!timeseriesData || timeseriesData.length === 0) {
       return {
@@ -81,7 +76,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       return norm.includes('timestamp') || norm.includes('datetime') || norm === 'date' || norm === 'time';
     };
 
-    // Extract dynamic speed keys from database document maps
+    // Extract dynamic keys from database document maps
     const speedKeys = new Set();
     const directionKeys = new Set();
 
@@ -97,11 +92,10 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     const speedKeysArr = Array.from(speedKeys);
     const directionKeysArr = Array.from(directionKeys);
 
-    // Filter additional metrics from CSV columns stored in rawRowData
+    // Filter additional metrics from CSV columns stored in rawRowData (Requirement 3 & 9)
     const excludedBaseKeys = ['humidity', 'temperature', 'timestamp', '_id', 'createdAt', 'updatedAt', '__v'];
     const additionalKeys = rawKeys.filter((key) => {
       if (isTime(key)) return false;
-      // If matches speed or direction alias, it is handled on standard tabs
       if (isSpeed(key) || isDirection(key)) return false;
       
       const normKey = normalize(key);
@@ -115,8 +109,17 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     const allMetrics = [];
     speedKeysArr.forEach((k) => allMetrics.push({ value: `speed.${k}`, label: formatMetricLabel(k) }));
     directionKeysArr.forEach((k) => allMetrics.push({ value: `direction.${k}`, label: formatMetricLabel(k) }));
-    allMetrics.push({ value: 'temperature', label: 'Temperature' });
-    allMetrics.push({ value: 'humidity', label: 'Humidity' });
+    
+    // Check if temperature and humidity exist in database
+    const temperatureExists = timeseriesData.some(d => d.temperature !== undefined && d.temperature !== null);
+    const humidityExists = timeseriesData.some(d => d.humidity !== undefined && d.humidity !== null);
+
+    if (temperatureExists) {
+      allMetrics.push({ value: 'temperature', label: 'Temperature' });
+    }
+    if (humidityExists) {
+      allMetrics.push({ value: 'humidity', label: 'Humidity' });
+    }
     additionalKeys.forEach((k) => allMetrics.push({ value: `additional.${k}`, label: k }));
 
     return {
@@ -130,8 +133,32 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     };
   }, [timeseriesData]);
 
-  // Set initial metric selections when dataset is parsed
-  useMemo(() => {
+  // Synchronize speed check-state dynamically when dataset updates (Requirement 5)
+  useEffect(() => {
+    if (datasetMeta.speedKeys.length > 0) {
+      const initial = {};
+      datasetMeta.speedKeys.forEach((key, index) => {
+        // Default select the first two heights
+        initial[key] = index < 2;
+      });
+      setSelectedHeights(initial);
+    }
+  }, [datasetMeta.speedKeys]);
+
+  // Synchronize wind direction check-state dynamically when dataset updates
+  useEffect(() => {
+    if (datasetMeta.directionKeys.length > 0) {
+      const initial = {};
+      datasetMeta.directionKeys.forEach((key, index) => {
+        // Default select the first direction height
+        initial[key] = index === 0;
+      });
+      setSelectedDirections(initial);
+    }
+  }, [datasetMeta.directionKeys]);
+
+  // Sync default additional metrics
+  useEffect(() => {
     if (datasetMeta.additionalKeys.length > 0 && !selectedAdditionalMetric) {
       setSelectedAdditionalMetric(datasetMeta.additionalKeys[0]);
     }
@@ -140,6 +167,33 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       setScatterY(datasetMeta.allMetrics[1]?.value);
     }
   }, [datasetMeta, selectedAdditionalMetric, scatterX]);
+
+  // Print telemetry debugging logs to console on metric/tab selections (Requirement 11)
+  useEffect(() => {
+    let selectedText = '';
+    if (activeTab === 0) {
+      selectedText = `Speeds: ${Object.keys(selectedHeights).filter(k => selectedHeights[k]).join(', ')}`;
+    } else if (activeTab === 1) {
+      selectedText = `Directions: ${Object.keys(selectedDirections).filter(k => selectedDirections[k]).join(', ')}`;
+    } else if (activeTab === 2) {
+      selectedText = 'Temperature';
+    } else if (activeTab === 3) {
+      selectedText = 'Humidity';
+    } else if (activeTab === 4) {
+      selectedText = generatedScatterConfig 
+        ? `Scatter [X: ${generatedScatterConfig.xKey}, Y: ${generatedScatterConfig.yKey}]`
+        : 'Scatter config pending';
+    } else if (activeTab === 5) {
+      selectedText = `Additional: ${selectedAdditionalMetric}`;
+    }
+
+    console.log('--- Visualization State Selection ---');
+    console.log(`Active Tab: ${activeTab}`);
+    console.log(`Discovered speed keys: ${datasetMeta.speedKeys.join(', ')}`);
+    console.log(`Discovered direction keys: ${datasetMeta.directionKeys.join(', ')}`);
+    console.log(`Discovered additional keys: ${datasetMeta.additionalKeys.join(', ')}`);
+    console.log(`Selected Metric: ${selectedText}`);
+  }, [activeTab, selectedHeights, selectedDirections, selectedAdditionalMetric, generatedScatterConfig, datasetMeta]);
 
   // Clean metric label formatter
   function formatMetricLabel(key) {
@@ -220,7 +274,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     };
   }, [timeseriesData, generatedScatterConfig, showTrendLine]);
 
-  // --- Common Dark Plotly Layout Configuration ---
+  // --- Plotly Themes Configuration ---
   const plotlyLayoutDefaults = useMemo(() => {
     return {
       paper_bgcolor: 'transparent',
@@ -260,7 +314,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
   const config = {
     responsive: true,
     displaylogo: false,
-    modeBarButtonsToRemove: ['select2d', 'lasso2d'],
+    modeBarButtonsToRemove: [], // Keep all zoom, pan, select, reset options (Requirement 7)
     toImageButtonOptions: {
       format: 'png',
       filename: 'wind_platform_chart',
@@ -273,13 +327,33 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     setGeneratedScatterConfig({ xKey: scatterX, yKey: scatterY });
   };
 
+  // Check if an array of values contains only empty/null items (Requirement 10)
+  const isDataEmpty = (values) => {
+    if (!values || values.length === 0) return true;
+    return values.every(v => v === null || v === undefined || isNaN(v));
+  };
+
+  const renderNoDataWarning = (metricName) => {
+    return (
+      <Box className={styles.emptyState}>
+        <FiAlertCircle size={52} className={styles.alertIcon} />
+        <Typography variant="h6" className={styles.emptyStateTitle} sx={{ color: '#fb7185' }}>
+          No Data Found for Metric
+        </Typography>
+        <Typography variant="body2" className={styles.emptyStateSubtitle}>
+          The metric <strong>{metricName}</strong> exists in the database schema but contains no loaded observations.
+        </Typography>
+      </Box>
+    );
+  };
+
   // --- Rendering Chart Core Logic ---
   const renderChart = () => {
     if (isLoading) {
       return (
         <Box className={styles.chartSkeletonWrapper}>
-          <Skeleton variant="text" width="60%" height={32} />
-          <Skeleton variant="rectangular" width="100%" height={350} sx={{ borderRadius: '16px', mt: 2 }} />
+          <Skeleton variant="text" width="40%" height={32} />
+          <Skeleton variant="rectangular" width="100%" height={600} sx={{ borderRadius: '16px', mt: 2 }} />
         </Box>
       );
     }
@@ -287,12 +361,12 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     if (hasError) {
       return (
         <Box className={styles.emptyState}>
-          <FiAlertCircle size={44} className={styles.alertIcon} />
+          <FiAlertCircle size={52} className={styles.alertIcon} />
           <Typography variant="h6" className={styles.emptyStateTitle}>
             Connection Error
           </Typography>
           <Typography variant="body2" className={styles.emptyStateSubtitle}>
-            Failed to query timeseries data: {String(hasError)}
+            Failed to query timeseries database: {String(hasError)}
           </Typography>
         </Box>
       );
@@ -301,12 +375,12 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     if (!timeseriesData || timeseriesData.length === 0) {
       return (
         <Box className={styles.emptyState}>
-          <FiDatabase size={48} className={styles.databaseIcon} />
+          <FiDatabase size={56} className={styles.databaseIcon} />
           <Typography variant="h6" className={styles.emptyStateTitle}>
-            No Data Available
+            No Valid Records Available
           </Typography>
           <Typography variant="body2" className={styles.emptyStateSubtitle}>
-            Please upload a CSV dataset using the upload button at the top.
+            Please upload a CSV dataset containing valid records. Only validated entries in the database are charted.
           </Typography>
         </Box>
       );
@@ -314,7 +388,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
     const timestamps = timeseriesData.map((d) => d.timestamp);
 
-    // TAB 0: Wind Speed (Interactive Multi-Height Overlay)
+    // TAB 0: Wind Speed overlay
     if (activeTab === 0) {
       const traces = [];
       const colors = {
@@ -324,31 +398,40 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
         windSpeed20m: '#f59e0b',
       };
 
-      Object.entries(selectedHeights).forEach(([key, isSelected]) => {
-        if (isSelected) {
-          const values = timeseriesData.map((d) => d.windSpeeds?.[key]);
-          traces.push({
-            x: timestamps,
-            y: values,
-            type: 'scatter',
-            mode: 'lines',
-            name: formatMetricLabel(key),
-            line: { color: colors[key] || '#38bdf8', width: 2 },
-            hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${formatMetricLabel(key)}:</b> %{y:.2f} m/s<extra></extra>`,
-          });
-        }
-      });
+      const activeKeys = Object.keys(selectedHeights).filter(k => selectedHeights[k]);
 
-      if (traces.length === 0) {
+      if (activeKeys.length === 0) {
         return (
           <Box className={styles.emptySelectionState}>
-            <Typography variant="body1">Select at least one height metric to display</Typography>
+            <Typography variant="body1">Select at least one speed height level above to visualize</Typography>
           </Box>
         );
       }
 
+      // Collect data and check for emptiness
+      let allTracesEmpty = true;
+      activeKeys.forEach((key) => {
+        const values = timeseriesData.map((d) => d.windSpeeds?.[key]);
+        if (!isDataEmpty(values)) {
+          allTracesEmpty = false;
+        }
+        traces.push({
+          x: timestamps,
+          y: values,
+          type: 'scatter',
+          mode: 'lines',
+          name: formatMetricLabel(key),
+          line: { color: colors[key] || '#38bdf8', width: 2 },
+          hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${formatMetricLabel(key)}:</b> %{y:.2f} m/s<extra></extra>`,
+        });
+      });
+
+      if (allTracesEmpty) {
+        return renderNoDataWarning(activeKeys.map(formatMetricLabel).join(' / '));
+      }
+
       return (
-        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={400} sx={{ borderRadius: '16px' }} />}>
+        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={680} sx={{ borderRadius: '16px' }} />}>
           <LazyPlot
             data={traces}
             layout={{
@@ -360,7 +443,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
             }}
             config={config}
             useResizeHandler
-            style={{ width: '100%', height: '420px' }}
+            style={{ width: '100%', height: '680px' }}
           />
         </Suspense>
       );
@@ -368,24 +451,44 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
     // TAB 1: Wind Direction
     if (activeTab === 1) {
-      // Find first direction key or fallback
-      const dirKey = datasetMeta.directionKeys[0] || 'windDirection';
-      const values = timeseriesData.map((d) => d.windDirections?.[dirKey]);
+      const activeKeys = Object.keys(selectedDirections).filter(k => selectedDirections[k]);
 
-      const trace = {
-        x: timestamps,
-        y: values,
-        type: 'scatter',
-        mode: 'markers',
-        name: formatMetricLabel(dirKey),
-        marker: { color: '#38bdf8', size: 5, opacity: 0.8 },
-        hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>Direction:</b> %{y:.1f}°<extra></extra>`,
-      };
+      if (activeKeys.length === 0) {
+        return (
+          <Box className={styles.emptySelectionState}>
+            <Typography variant="body1">Select at least one wind direction height above to visualize</Typography>
+          </Box>
+        );
+      }
+
+      let allTracesEmpty = true;
+      const traces = [];
+      const colors = ['#38bdf8', '#fb7185', '#34d399', '#f59e0b'];
+
+      activeKeys.forEach((key, idx) => {
+        const values = timeseriesData.map((d) => d.windDirections?.[key]);
+        if (!isDataEmpty(values)) {
+          allTracesEmpty = false;
+        }
+        traces.push({
+          x: timestamps,
+          y: values,
+          type: 'scatter',
+          mode: 'markers',
+          name: formatMetricLabel(key),
+          marker: { color: colors[idx % colors.length], size: 5.5, opacity: 0.8 },
+          hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>${formatMetricLabel(key)}:</b> %{y:.1f}°<extra></extra>`,
+        });
+      });
+
+      if (allTracesEmpty) {
+        return renderNoDataWarning(activeKeys.map(formatMetricLabel).join(' / '));
+      }
 
       return (
-        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={400} sx={{ borderRadius: '16px' }} />}>
+        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={680} sx={{ borderRadius: '16px' }} />}>
           <LazyPlot
-            data={[trace]}
+            data={traces}
             layout={{
               ...plotlyLayoutDefaults,
               yaxis: {
@@ -396,7 +499,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
             }}
             config={config}
             useResizeHandler
-            style={{ width: '100%', height: '420px' }}
+            style={{ width: '100%', height: '680px' }}
           />
         </Suspense>
       );
@@ -405,6 +508,11 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     // TAB 2: Temperature
     if (activeTab === 2) {
       const values = timeseriesData.map((d) => d.temperature);
+      
+      if (isDataEmpty(values)) {
+        return renderNoDataWarning('Temperature');
+      }
+
       const trace = {
         x: timestamps,
         y: values,
@@ -418,7 +526,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       };
 
       return (
-        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={400} sx={{ borderRadius: '16px' }} />}>
+        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={680} sx={{ borderRadius: '16px' }} />}>
           <LazyPlot
             data={[trace]}
             layout={{
@@ -430,7 +538,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
             }}
             config={config}
             useResizeHandler
-            style={{ width: '100%', height: '420px' }}
+            style={{ width: '100%', height: '680px' }}
           />
         </Suspense>
       );
@@ -439,6 +547,11 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     // TAB 3: Humidity
     if (activeTab === 3) {
       const values = timeseriesData.map((d) => d.humidity);
+
+      if (isDataEmpty(values)) {
+        return renderNoDataWarning('Humidity');
+      }
+
       const trace = {
         x: timestamps,
         y: values,
@@ -452,7 +565,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       };
 
       return (
-        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={400} sx={{ borderRadius: '16px' }} />}>
+        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={680} sx={{ borderRadius: '16px' }} />}>
           <LazyPlot
             data={[trace]}
             layout={{
@@ -465,19 +578,19 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
             }}
             config={config}
             useResizeHandler
-            style={{ width: '100%', height: '420px' }}
+            style={{ width: '100%', height: '680px' }}
           />
         </Suspense>
       );
     }
 
-    // TAB 4: Scatter Analysis (X vs Y correlation plot with regression line)
+    // TAB 4: Scatter Analysis
     if (activeTab === 4) {
       if (!generatedScatterConfig) {
         return (
           <Box className={styles.emptySelectionState}>
-            <FiPlay size={32} style={{ marginBottom: 12, color: 'rgba(226,232,240,0.4)' }} />
-            <Typography variant="body1">Select axes and click "Generate Scatter Plot" on the left</Typography>
+            <FiPlay size={36} style={{ marginBottom: 12, color: '#6ee7f9' }} />
+            <Typography variant="body1">Select metrics in the control panel above and click "Generate Plot"</Typography>
           </Box>
         );
       }
@@ -520,6 +633,10 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
         }
       });
 
+      if (isDataEmpty(xData) || isDataEmpty(yData)) {
+        return renderNoDataWarning(`${xKey} vs ${yKey}`);
+      }
+
       const traces = [
         {
           x: xData,
@@ -537,7 +654,6 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
         },
       ];
 
-      // Append linear regression line if checked
       if (showTrendLine && regressionLine) {
         traces.push({
           x: regressionLine.x,
@@ -555,7 +671,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       };
 
       return (
-        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={400} sx={{ borderRadius: '16px' }} />}>
+        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={680} sx={{ borderRadius: '16px' }} />}>
           <LazyPlot
             data={traces}
             layout={{
@@ -574,18 +690,18 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
               modeBarButtonsToRemove: [], // Allow lasso & box select
             }}
             useResizeHandler
-            style={{ width: '100%', height: '420px' }}
+            style={{ width: '100%', height: '680px' }}
           />
         </Suspense>
       );
     }
 
-    // TAB 5: Additional Metrics (Dynamic CSV Column Line Plot)
+    // TAB 5: Additional Metrics
     if (activeTab === 5) {
       if (!selectedAdditionalMetric) {
         return (
           <Box className={styles.emptySelectionState}>
-            <Typography variant="body1">No additional columns detected in the uploaded CSV</Typography>
+            <Typography variant="body1">No additional columns detected in the dataset</Typography>
           </Box>
         );
       }
@@ -594,6 +710,10 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
         const rawVal = d.rawRowData?.[selectedAdditionalMetric];
         return rawVal !== undefined && rawVal !== null ? parseFloat(rawVal) : null;
       });
+
+      if (isDataEmpty(values)) {
+        return renderNoDataWarning(selectedAdditionalMetric);
+      }
 
       const trace = {
         x: timestamps,
@@ -608,7 +728,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       };
 
       return (
-        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={400} sx={{ borderRadius: '16px' }} />}>
+        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={680} sx={{ borderRadius: '16px' }} />}>
           <LazyPlot
             data={[trace]}
             layout={{
@@ -620,18 +740,176 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
             }}
             config={config}
             useResizeHandler
-            style={{ width: '100%', height: '420px' }}
+            style={{ width: '100%', height: '680px' }}
           />
         </Suspense>
       );
     }
   };
 
+  // Render Horizontal control bar above full page chart (Requirement 6 & 8)
+  const renderControlPanel = () => {
+    if (!timeseriesData || timeseriesData.length === 0) return null;
+
+    if (activeTab === 0) {
+      return (
+        <Paper className={styles.horizontalControlBar} elevation={0}>
+          <Typography variant="subtitle2" className={styles.controlTitle}>
+            Select Heights overlay
+          </Typography>
+          <FormGroup row sx={{ gap: 2 }}>
+            {datasetMeta.speedKeys.map((key) => (
+              <FormControlLabel
+                key={key}
+                control={
+                  <Checkbox
+                    checked={Boolean(selectedHeights[key])}
+                    onChange={(e) =>
+                      setSelectedHeights((prev) => ({
+                        ...prev,
+                        [key]: e.target.checked,
+                      }))
+                    }
+                    sx={{ color: 'rgba(255,255,255,0.2)', '&.Mui-checked': { color: '#6ee7f9' } }}
+                  />
+                }
+                label={formatMetricLabel(key)}
+                sx={{ color: '#eff6ff' }}
+              />
+            ))}
+          </FormGroup>
+        </Paper>
+      );
+    }
+
+    if (activeTab === 1) {
+      return (
+        <Paper className={styles.horizontalControlBar} elevation={0}>
+          <Typography variant="subtitle2" className={styles.controlTitle}>
+            Select Directions overlay
+          </Typography>
+          <FormGroup row sx={{ gap: 2 }}>
+            {datasetMeta.directionKeys.map((key) => (
+              <FormControlLabel
+                key={key}
+                control={
+                  <Checkbox
+                    checked={Boolean(selectedDirections[key])}
+                    onChange={(e) =>
+                      setSelectedDirections((prev) => ({
+                        ...prev,
+                        [key]: e.target.checked,
+                      }))
+                    }
+                    sx={{ color: 'rgba(255,255,255,0.2)', '&.Mui-checked': { color: '#38bdf8' } }}
+                  />
+                }
+                label={formatMetricLabel(key)}
+                sx={{ color: '#eff6ff' }}
+              />
+            ))}
+          </FormGroup>
+        </Paper>
+      );
+    }
+
+    if (activeTab === 4) {
+      return (
+        <Paper className={styles.horizontalControlBar} elevation={0}>
+          <Typography variant="subtitle2" className={styles.controlTitle}>
+            Axes Correlation Settings
+          </Typography>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2.5} alignItems="center" width="100%">
+            <FormControl size="small" className={styles.horizontalSelectCtrl} sx={{ minWidth: 200 }}>
+              <InputLabel id="x-axis-select-label" sx={{ color: 'rgba(255,255,255,0.5)' }}>X-Axis Metric</InputLabel>
+              <Select
+                labelId="x-axis-select-label"
+                value={scatterX}
+                label="X-Axis Metric"
+                onChange={(e) => setScatterX(e.target.value)}
+                sx={{ borderRadius: '10px' }}
+              >
+                {datasetMeta.allMetrics.map((opt) => (
+                  <MenuItem key={opt.value} value={opt.value} disabled={opt.value === scatterY}>
+                    {opt.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" className={styles.horizontalSelectCtrl} sx={{ minWidth: 200 }}>
+              <InputLabel id="y-axis-select-label" sx={{ color: 'rgba(255,255,255,0.5)' }}>Y-Axis Metric</InputLabel>
+              <Select
+                labelId="y-axis-select-label"
+                value={scatterY}
+                label="Y-Axis Metric"
+                onChange={(e) => setScatterY(e.target.value)}
+                sx={{ borderRadius: '10px' }}
+              >
+                {datasetMeta.allMetrics.map((opt) => (
+                  <MenuItem key={opt.value} value={opt.value} disabled={opt.value === scatterX}>
+                    {opt.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={showTrendLine}
+                  onChange={(e) => setShowTrendLine(e.target.checked)}
+                  sx={{ color: 'rgba(255,255,255,0.2)', '&.Mui-checked': { color: '#6ee7f9' } }}
+                />
+              }
+              label="Show Trend Line"
+              sx={{ color: 'rgba(226,232,240,0.8)' }}
+            />
+
+            <Button
+              variant="contained"
+              onClick={handleGenerateScatter}
+              disabled={!scatterX || !scatterY}
+              className={styles.horizontalGenerateBtn}
+              startIcon={<FiTrendingUp />}
+              sx={{ ml: { md: 'auto !important' } }}
+            >
+              Generate Plot
+            </Button>
+          </Stack>
+        </Paper>
+      );
+    }
+
+    if (activeTab === 5 && datasetMeta.additionalKeys.length > 0) {
+      return (
+        <Paper className={styles.horizontalControlBar} elevation={0}>
+          <Typography variant="subtitle2" className={styles.controlTitle}>
+            Select Dataset Column Metric
+          </Typography>
+          <Box className={styles.metricChipsContainer}>
+            {datasetMeta.additionalKeys.map((key) => (
+              <Chip
+                key={key}
+                label={key}
+                onClick={() => setSelectedAdditionalMetric(key)}
+                className={`${styles.metricChip} ${selectedAdditionalMetric === key ? styles.metricChipActive : ''}`}
+                variant="outlined"
+              />
+            ))}
+          </Box>
+        </Paper>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <Paper className={styles.workspace} elevation={0}>
-      <Stack spacing={3}>
+      <Stack spacing={3.2}>
         {/* Workspace Title & Layout Header */}
-        <Stack direction={{ xs: 'column', lg: 'row' }} justifyContent="space-between" spacing={2}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2} alignItems="center">
           <Box>
             <Typography variant="h5" className={styles.title}>
               {activeTab === 0 && 'Wind Speed Heights overlay'}
@@ -672,162 +950,13 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
           )}
         </Stack>
 
-        {/* Tab-Specific Control Panels */}
-        <Grid container spacing={2}>
-          {/* Controls Side Panel */}
-          {activeTab === 0 && (
-            <Grid item xs={12}>
-              <Paper className={styles.controlBox} elevation={0}>
-                <Typography variant="subtitle2" className={styles.controlTitle}>
-                  Select Height Levels
-                </Typography>
-                <FormGroup row>
-                  {['windSpeed100m', 'windSpeed80m', 'windSpeed50m', 'windSpeed20m'].map((key) => {
-                    const exists = datasetMeta.speedKeys.includes(key);
-                    return (
-                      <FormControlLabel
-                        key={key}
-                        control={
-                          <Checkbox
-                            checked={selectedHeights[key]}
-                            disabled={!exists}
-                            onChange={(e) =>
-                              setSelectedHeights((prev) => ({
-                                ...prev,
-                                [key]: e.target.checked,
-                              }))
-                            }
-                            sx={{ color: 'rgba(255,255,255,0.2)', '&.Mui-checked': { color: '#6ee7f9' } }}
-                          />
-                        }
-                        label={
-                          <Box display="inline-flex" alignItems="center">
-                            <span style={{ color: exists ? '#eff6ff' : 'rgba(226,232,240,0.35)' }}>
-                              {formatMetricLabel(key)}
-                            </span>
-                            {!exists && (
-                              <Chip
-                                label="N/A"
-                                size="small"
-                                className={styles.naChip}
-                                sx={{ ml: 1, height: '16px', fontSize: '9px', background: 'rgba(251,113,133,0.08)', color: '#fb7185' }}
-                              />
-                            )}
-                          </Box>
-                        }
-                      />
-                    );
-                  })}
-                </FormGroup>
-              </Paper>
-            </Grid>
-          )}
+        {/* Tab-Specific Control Panels - Full Width */}
+        {renderControlPanel()}
 
-          {activeTab === 4 && (
-            <Grid item xs={12} md={3.5}>
-              <Paper className={styles.controlBox} elevation={0}>
-                <Typography variant="subtitle2" className={styles.controlTitle}>
-                  Configure Axis Elements
-                </Typography>
-                <Stack spacing={2.5}>
-                  <FormControl fullWidth size="small" className={styles.formCtrl}>
-                    <InputLabel id="x-axis-select-label" sx={{ color: 'rgba(255,255,255,0.5)' }}>X-Axis Metric</InputLabel>
-                    <Select
-                      labelId="x-axis-select-label"
-                      value={scatterX}
-                      label="X-Axis Metric"
-                      onChange={(e) => setScatterX(e.target.value)}
-                      sx={{ borderRadius: '10px' }}
-                    >
-                      {datasetMeta.allMetrics.map((opt) => (
-                        <MenuItem key={opt.value} value={opt.value} disabled={opt.value === scatterY}>
-                          {opt.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-
-                  <FormControl fullWidth size="small" className={styles.formCtrl}>
-                    <InputLabel id="y-axis-select-label" sx={{ color: 'rgba(255,255,255,0.5)' }}>Y-Axis Metric</InputLabel>
-                    <Select
-                      labelId="y-axis-select-label"
-                      value={scatterY}
-                      label="Y-Axis Metric"
-                      onChange={(e) => setScatterY(e.target.value)}
-                      sx={{ borderRadius: '10px' }}
-                    >
-                      {datasetMeta.allMetrics.map((opt) => (
-                        <MenuItem key={opt.value} value={opt.value} disabled={opt.value === scatterX}>
-                          {opt.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={showTrendLine}
-                        onChange={(e) => setShowTrendLine(e.target.checked)}
-                        sx={{ color: 'rgba(255,255,255,0.2)', '&.Mui-checked': { color: '#6ee7f9' } }}
-                      />
-                    }
-                    label="Show Trend Line"
-                    sx={{ color: 'rgba(226,232,240,0.8)' }}
-                  />
-
-                  <Button
-                    variant="contained"
-                    fullWidth
-                    onClick={handleGenerateScatter}
-                    disabled={!scatterX || !scatterY || timeseriesData.length === 0}
-                    className={styles.generateBtn}
-                    startIcon={<FiTrendingUp />}
-                  >
-                    Generate Plot
-                  </Button>
-                </Stack>
-              </Paper>
-            </Grid>
-          )}
-
-          {activeTab === 5 && datasetMeta.additionalKeys.length > 0 && (
-            <Grid item xs={12} md={3}>
-              <Paper className={styles.controlBox} elevation={0}>
-                <Typography variant="subtitle2" className={styles.controlTitle}>
-                  Available Dataset Columns
-                </Typography>
-                <Stack spacing={1} sx={{ maxHeight: '340px', overflowY: 'auto', pr: 0.5 }}>
-                  {datasetMeta.additionalKeys.map((key) => (
-                    <Button
-                      key={key}
-                      variant={selectedAdditionalMetric === key ? 'contained' : 'outlined'}
-                      className={
-                        selectedAdditionalMetric === key
-                          ? styles.metricButtonActive
-                          : styles.metricButton
-                      }
-                      onClick={() => setSelectedAdditionalMetric(key)}
-                      fullWidth
-                    >
-                      {key}
-                    </Button>
-                  ))}
-                </Stack>
-              </Paper>
-            </Grid>
-          )}
-
-          {/* Chart Rendering Frame */}
-          <Grid
-            item
-            xs={12}
-            md={activeTab === 4 || (activeTab === 5 && datasetMeta.additionalKeys.length > 0) ? 8.5 : 12}
-            lg={activeTab === 4 ? 8.5 : activeTab === 5 && datasetMeta.additionalKeys.length > 0 ? 9 : 12}
-          >
-            <Box className={styles.chartWrapper}>{renderChart()}</Box>
-          </Grid>
-        </Grid>
+        {/* 100% Full-Width Chart Container (Requirement 6 & 8) */}
+        <Box className={styles.chartWrapper}>
+          {renderChart()}
+        </Box>
       </Stack>
     </Paper>
   );
