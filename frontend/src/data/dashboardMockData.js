@@ -6,6 +6,9 @@ import {
   FiWind,
   FiThermometer,
   FiBarChart2,
+  FiCompass,
+  FiTrendingUp,
+  FiSliders,
 } from 'react-icons/fi';
 
 export const datasetStatus = {
@@ -124,10 +127,11 @@ export const buildSummaryCards = (summaryData) => {
 
 export const graphTabs = [
   { label: 'Wind Speed', icon: FiWind },
-  { label: 'Wind Direction', icon: FiActivity },
+  { label: 'Wind Direction', icon: FiCompass },
   { label: 'Temperature', icon: FiThermometer },
   { label: 'Humidity', icon: FiDroplet },
-  { label: 'Additional Metrics', icon: FiBarChart2 },
+  { label: 'Scatter Analysis', icon: FiTrendingUp },
+  { label: 'Additional Metrics', icon: FiSliders },
 ];
 
 export const errorLogRows = [

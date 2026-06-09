@@ -53,11 +53,14 @@ const getSummary = async (req, res) => {
  */
 const getTimeseries = async (req, res) => {
 	try {
-		const records = await WindData.find()
-			.select('timestamp humidity temperature')
-			.sort({ timestamp: -1 })
-			.limit(100)
-			.lean();
+		const limit = req.query.limit ? parseInt(req.query.limit, 10) : 5000;
+		const query = WindData.find().sort({ timestamp: 1 });
+		
+		if (limit > 0) {
+			query.limit(limit);
+		}
+
+		const records = await query.lean();
 
 		res.status(200).json({
 			success: true,

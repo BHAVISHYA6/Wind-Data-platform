@@ -12,9 +12,15 @@ import GraphWorkspace from './components/graph/GraphWorkspace';
 import ErrorLogsTable from './components/tables/ErrorLogsTable';
 import DashboardLayout from './components/layout/DashboardLayout';
 import CsvUploadModal from './components/upload/CsvUploadModal';
-import { fetchSummaryAnalytics, fetchErrorLogs } from './services/analyticsApi';
+import {
+  fetchSummaryAnalytics,
+  fetchErrorLogs,
+  fetchTimeseriesData,
+} from './services/analyticsApi';
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState(0);
+
   const [summaryCards, setSummaryCards] = useState(defaultSummaryCards);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryError, setSummaryError] = useState('');
@@ -22,6 +28,10 @@ export default function App() {
   const [errorLogs, setErrorLogs] = useState([]);
   const [errorLogsLoading, setErrorLogsLoading] = useState(true);
   const [errorLogsError, setErrorLogsError] = useState('');
+
+  const [timeseriesData, setTimeseriesData] = useState([]);
+  const [timeseriesLoading, setTimeseriesLoading] = useState(true);
+  const [timeseriesError, setTimeseriesError] = useState('');
 
   const [datasetStatus, setDatasetStatus] = useState({
     label: 'Connecting to DB',
@@ -93,10 +103,28 @@ export default function App() {
     }
   }, []);
 
+  const loadTimeseries = useCallback(async () => {
+    setTimeseriesLoading(true);
+    setTimeseriesError('');
+
+    try {
+      // Fetch dynamic record count limit (e.g. 5000 records)
+      const data = await fetchTimeseriesData(5000);
+      setTimeseriesData(data);
+    } catch (error) {
+      const message = error?.response?.data?.error || error?.message || 'Failed to load timeseries data';
+      setTimeseriesError(message);
+      setTimeseriesData([]);
+    } finally {
+      setTimeseriesLoading(false);
+    }
+  }, []);
+
   const handleRefreshAll = useCallback(() => {
     loadSummary();
     loadErrorLogs();
-  }, [loadSummary, loadErrorLogs]);
+    loadTimeseries();
+  }, [loadSummary, loadErrorLogs, loadTimeseries]);
 
   useEffect(() => {
     handleRefreshAll();
@@ -126,8 +154,17 @@ export default function App() {
           errorMessage={summaryError}
           onRetry={loadSummary}
         />
-        <GraphTabsBar tabs={graphTabs} />
-        <GraphWorkspace />
+        <GraphTabsBar
+          tabs={graphTabs}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+        />
+        <GraphWorkspace
+          activeTab={activeTab}
+          timeseriesData={timeseriesData}
+          isLoading={timeseriesLoading}
+          hasError={timeseriesError}
+        />
         
         {/* Render live error logs table */}
         <ErrorLogsTable rows={formattedErrorLogs} />
@@ -160,4 +197,5 @@ export default function App() {
     </Box>
   );
 }
+
 

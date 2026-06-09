@@ -2,9 +2,7 @@ import { useState } from 'react';
 import { Paper, Tabs, Tab, Stack } from '@mui/material';
 import styles from './GraphTabs.module.css';
 
-export default function GraphTabsBar({ tabs }) {
-  const [activeTab, setActiveTab] = useState(0);
-
+export default function GraphTabsBar({ tabs, activeTab, setActiveTab }) {
   return (
     <Paper className={styles.tabsCard} elevation={0}>
       <Stack spacing={1.2}>

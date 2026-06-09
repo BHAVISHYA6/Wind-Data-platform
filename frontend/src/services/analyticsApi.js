@@ -23,3 +23,10 @@ export const fetchErrorLogs = async () => {
   return response.data?.data ?? response.data ?? [];
 };
 
+export const fetchTimeseriesData = async (limit = 5000) => {
+  const response = await apiClient.get('/api/analytics/timeseries', {
+    params: { limit },
+  });
+  return response.data?.data ?? response.data ?? [];
+};
+
