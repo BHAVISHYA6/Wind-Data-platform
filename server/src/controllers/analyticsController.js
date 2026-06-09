@@ -1,14 +1,50 @@
+const mongoose = require('mongoose');
 const WindData = require('../models/WindData');
 const ErrorLog = require('../models/ErrorLog');
+const Dataset = require('../models/Dataset');
+
+// Helper to determine the target datasetId (either query param or fallback to latest)
+const getTargetDatasetId = async (queryDatasetId) => {
+	if (queryDatasetId && mongoose.Types.ObjectId.isValid(queryDatasetId)) {
+		return queryDatasetId;
+	}
+	// Fallback to the latest uploaded dataset
+	const latestDataset = await Dataset.findOne().sort({ uploadTimestamp: -1 }).select('_id');
+	return latestDataset ? latestDataset._id : null;
+};
 
 /**
  * GET /api/analytics/summary
- * Returns aggregate statistics about wind data and error logs
+ * Returns aggregate statistics about wind data and error logs for the target dataset
  */
 const getSummary = async (req, res) => {
 	try {
-		// Use aggregation pipeline to get statistics
+		const datasetId = await getTargetDatasetId(req.query.datasetId);
+		if (!datasetId) {
+			return res.status(200).json({
+				success: true,
+				data: {
+					datasetId: null,
+					datasetName: 'No active dataset',
+					uploadTimestamp: null,
+					totalWindDataRecords: 0,
+					totalErrorLogRecords: 0,
+					averageHumidity: null,
+					averageTemperature: null,
+				},
+			});
+		}
+
+		// Retrieve dataset details
+		const dataset = await Dataset.findById(datasetId);
+
+		// Group statistics only for matching datasetId
 		const windDataStats = await WindData.aggregate([
+			{
+				$match: {
+					datasetId: new mongoose.Types.ObjectId(datasetId),
+				},
+			},
 			{
 				$group: {
 					_id: null,
@@ -19,9 +55,8 @@ const getSummary = async (req, res) => {
 			},
 		]);
 
-		const errorLogsCount = await ErrorLog.countDocuments();
+		const errorLogsCount = await ErrorLog.countDocuments({ datasetId });
 
-		// Extract values or provide defaults if no data exists
 		const stats = windDataStats.length > 0 ? windDataStats[0] : {
 			totalRecords: 0,
 			avgHumidity: null,
@@ -31,6 +66,9 @@ const getSummary = async (req, res) => {
 		res.status(200).json({
 			success: true,
 			data: {
+				datasetId,
+				datasetName: dataset ? dataset.filename : 'Unknown',
+				uploadTimestamp: dataset ? dataset.uploadTimestamp : null,
 				totalWindDataRecords: stats.totalRecords,
 				totalErrorLogRecords: errorLogsCount,
 				averageHumidity: stats.avgHumidity ? parseFloat(stats.avgHumidity.toFixed(2)) : null,
@@ -49,12 +87,21 @@ const getSummary = async (req, res) => {
 
 /**
  * GET /api/analytics/timeseries
- * Returns latest 100 wind data records sorted by timestamp
+ * Returns latest wind data records for the target dataset sorted by timestamp
  */
 const getTimeseries = async (req, res) => {
 	try {
+		const datasetId = await getTargetDatasetId(req.query.datasetId);
+		if (!datasetId) {
+			return res.status(200).json({
+				success: true,
+				count: 0,
+				data: [],
+			});
+		}
+
 		const limit = req.query.limit ? parseInt(req.query.limit, 10) : 5000;
-		const query = WindData.find().sort({ timestamp: 1 });
+		const query = WindData.find({ datasetId }).sort({ timestamp: 1 });
 		
 		if (limit > 0) {
 			query.limit(limit);
@@ -78,12 +125,21 @@ const getTimeseries = async (req, res) => {
 };
 
 /**
- * GET /api/errorlogs
- * Returns latest 100 error logs
+ * GET /api/analytics/errorlogs
+ * Returns latest 100 error logs for the target dataset
  */
 const getErrorLogs = async (req, res) => {
 	try {
-		const errorLogs = await ErrorLog.find()
+		const datasetId = await getTargetDatasetId(req.query.datasetId);
+		if (!datasetId) {
+			return res.status(200).json({
+				success: true,
+				count: 0,
+				data: [],
+			});
+		}
+
+		const errorLogs = await ErrorLog.find({ datasetId })
 			.sort({ createdAt: -1 })
 			.limit(100)
 			.lean();
@@ -103,8 +159,30 @@ const getErrorLogs = async (req, res) => {
 	}
 };
 
+/**
+ * GET /api/analytics/datasets
+ * Returns list of all uploaded datasets
+ */
+const getDatasets = async (req, res) => {
+	try {
+		const datasets = await Dataset.find().sort({ uploadTimestamp: -1 }).lean();
+		res.status(200).json({
+			success: true,
+			data: datasets,
+		});
+	} catch (error) {
+		console.error('Error fetching datasets list:', error);
+		res.status(500).json({
+			success: false,
+			error: 'Failed to fetch datasets list',
+			message: error.message,
+		});
+	}
+};
+
 module.exports = {
 	getSummary,
 	getTimeseries,
 	getErrorLogs,
+	getDatasets,
 };

@@ -2,6 +2,12 @@ const mongoose = require('mongoose');
 
 const WindDataSchema = new mongoose.Schema(
 	{
+		datasetId: {
+			type: mongoose.Schema.Types.ObjectId,
+			ref: 'Dataset',
+			required: true,
+			index: true,
+		},
 		timestamp: {
 			type: Date,
 			required: true,

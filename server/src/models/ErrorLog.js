@@ -2,6 +2,12 @@ const mongoose = require('mongoose');
 
 const ErrorLogSchema = new mongoose.Schema(
 	{
+		datasetId: {
+			type: mongoose.Schema.Types.ObjectId,
+			ref: 'Dataset',
+			required: true,
+			index: true,
+		},
 		rowNumber: {
 			type: Number,
 			required: true,

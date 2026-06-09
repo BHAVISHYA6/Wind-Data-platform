@@ -4,6 +4,7 @@ const {
 	getSummary,
 	getTimeseries,
 	getErrorLogs,
+	getDatasets,
 } = require('../controllers/analyticsController');
 
 /**
@@ -26,5 +27,12 @@ router.get('/timeseries', getTimeseries);
  * @access  Public
  */
 router.get('/errorlogs', getErrorLogs);
+
+/**
+ * @route   GET /api/analytics/datasets
+ * @desc    Get list of all uploaded datasets
+ * @access  Public
+ */
+router.get('/datasets', getDatasets);
 
 module.exports = router;

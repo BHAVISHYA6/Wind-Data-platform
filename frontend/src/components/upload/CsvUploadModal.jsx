@@ -31,6 +31,22 @@ import {
 import { apiClient } from '../../services/analyticsApi';
 import styles from './CsvUploadModal.module.css';
 
+const stagesList = [
+  { key: 'uploading', label: 'Uploading file' },
+  { key: 'parsing', label: 'Parsing CSV data' },
+  { key: 'validating', label: 'Validating records' },
+  { key: 'saving', label: 'Saving to database' },
+];
+
+const stageOrder = ['uploading', 'parsing', 'validating', 'saving', 'completed'];
+
+const failedStageKeyMap = {
+  initialization: 'Uploading file',
+  parsing: 'Parsing CSV data',
+  validation: 'Validating records',
+  saving: 'Saving to database',
+};
+
 export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToast }) {
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState(null);
@@ -40,6 +56,8 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
   const [previewRows, setPreviewRows] = useState([]);
   const [uploadSummary, setUploadSummary] = useState(null);
   const [errorDetails, setErrorDetails] = useState('');
+  const [currentProcessingStage, setCurrentProcessingStage] = useState('idle'); // 'idle' | 'uploading' | 'parsing' | 'validating' | 'saving' | 'completed'
+  const [failedStage, setFailedStage] = useState('');
 
   const inputRef = useRef(null);
 
@@ -59,7 +77,30 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
     setPreviewRows([]);
     setUploadSummary(null);
     setErrorDetails('');
+    setCurrentProcessingStage('idle');
+    setFailedStage('');
   };
+
+  // Optimistic transition for stages at 100% upload progress (waiting for server response)
+  useEffect(() => {
+    let timer1;
+    let timer2;
+    if (uploadStatus === 'uploading' && uploadProgress === 100) {
+      setCurrentProcessingStage('parsing');
+      
+      timer1 = setTimeout(() => {
+        setCurrentProcessingStage('validating');
+      }, 1500);
+      
+      timer2 = setTimeout(() => {
+        setCurrentProcessingStage('saving');
+      }, 3500);
+    }
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+    };
+  }, [uploadProgress, uploadStatus]);
 
   // Simple CSV parser for browser preview
   const handleCSVPreview = (fileObject) => {
@@ -166,6 +207,8 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
 
     setUploadStatus('uploading');
     setUploadProgress(0);
+    setCurrentProcessingStage('uploading');
+    setFailedStage('');
 
     const formData = new FormData();
     formData.append('file', file);
@@ -179,6 +222,11 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
           const total = progressEvent.total || file.size;
           const percentCompleted = Math.round((progressEvent.loaded * 100) / total);
           setUploadProgress(percentCompleted);
+          if (percentCompleted < 100) {
+            setCurrentProcessingStage('uploading');
+          } else {
+            setCurrentProcessingStage('parsing');
+          }
         },
       });
 
@@ -187,16 +235,18 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
           totalRows: response.data.totalRows ?? 0,
           validRows: response.data.validRows ?? 0,
           invalidRows: response.data.invalidRows ?? 0,
+          processingTime: response.data.processingTime,
         });
         setUploadStatus('success');
+        setCurrentProcessingStage('completed');
         showToast({
           severity: 'success',
           message: `Successfully uploaded dataset: ${response.data.validRows} valid rows imported!`,
         });
 
-        // Trigger dashboard reload callback
+        // Trigger dashboard reload callback with new dataset ID
         if (onUploadSuccess) {
-          onUploadSuccess();
+          onUploadSuccess(response.data.datasetId);
         }
       } else {
         throw new Error(response.data?.message || 'Server did not report success');
@@ -204,7 +254,10 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
     } catch (error) {
       console.error('File upload error:', error);
       const serverMessage = error.response?.data?.message || error.message || 'Error occurred during upload';
+      const serverStage = error.response?.data?.stage || '';
+      
       setErrorDetails(serverMessage);
+      setFailedStage(serverStage);
       setUploadStatus('error');
       showToast({
         severity: 'error',
@@ -349,7 +402,11 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
                 <FiLoader className={styles.uploadSpinner} />
               </Box>
               <Typography variant="h6" className={styles.progressTitle}>
-                Uploading & parsing database records...
+                {currentProcessingStage === 'uploading' && `Uploading file... (${uploadProgress}%)`}
+                {currentProcessingStage === 'parsing' && 'Parsing CSV content...'}
+                {currentProcessingStage === 'validating' && 'Validating wind records...'}
+                {currentProcessingStage === 'saving' && 'Saving to database...'}
+                {currentProcessingStage === 'completed' && 'Processing completed!'}
               </Typography>
               <Box className={styles.progressBarWrapper}>
                 <LinearProgress
@@ -362,6 +419,45 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
               <Typography variant="body2" className={styles.progressFilename}>
                 Processing: {file.name} ({formatBytes(file.size)})
               </Typography>
+
+              {/* Progress Steps List */}
+              <Box className={styles.stagesListWrapper}>
+                <Stack spacing={2} alignSelf="stretch" sx={{ width: '100%', minWidth: '280px', mt: 1 }}>
+                  {stagesList.map((stage) => {
+                    const idx = stageOrder.indexOf(currentProcessingStage);
+                    const stageIdx = stageOrder.indexOf(stage.key);
+                    const isCompleted = idx > stageIdx;
+                    const isActive = currentProcessingStage === stage.key;
+
+                    let statusIcon;
+                    let statusClass = styles.stagePending;
+
+                    if (isCompleted) {
+                      statusIcon = <FiCheckCircle className={styles.stageCheckIcon} />;
+                      statusClass = styles.stageCompleted;
+                    } else if (isActive) {
+                      statusIcon = <FiLoader className={styles.stageSpinnerIcon} />;
+                      statusClass = styles.stageActive;
+                    } else {
+                      statusIcon = <Box className={styles.stagePendingDot} />;
+                      statusClass = styles.stagePending;
+                    }
+
+                    return (
+                      <Stack
+                        key={stage.key}
+                        direction="row"
+                        spacing={2}
+                        alignItems="center"
+                        className={`${styles.stageItem} ${statusClass}`}
+                      >
+                        {statusIcon}
+                        <Typography className={styles.stageLabel}>{stage.label}</Typography>
+                      </Stack>
+                    );
+                  })}
+                </Stack>
+              </Box>
             </Stack>
           </Box>
         )}
@@ -402,6 +498,40 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
                 />
               </GridContainer>
 
+              {uploadSummary.processingTime && (
+                <Box className={styles.benchmarksWrapper} width="100%">
+                  <Typography variant="subtitle2" className={styles.benchmarksTitle}>
+                    Processing Benchmarks
+                  </Typography>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} className={styles.benchmarksGrid}>
+                    <Box className={styles.benchmarkCard}>
+                      <Typography className={styles.benchmarkLabel}>Parsing CSV</Typography>
+                      <Typography className={styles.benchmarkValue}>
+                        {uploadSummary.processingTime.parsing != null ? `${uploadSummary.processingTime.parsing.toFixed(1)} ms` : 'N/A'}
+                      </Typography>
+                    </Box>
+                    <Box className={styles.benchmarkCard}>
+                      <Typography className={styles.benchmarkLabel}>Validation</Typography>
+                      <Typography className={styles.benchmarkValue}>
+                        {uploadSummary.processingTime.validation != null ? `${uploadSummary.processingTime.validation.toFixed(1)} ms` : 'N/A'}
+                      </Typography>
+                    </Box>
+                    <Box className={styles.benchmarkCard}>
+                      <Typography className={styles.benchmarkLabel}>Saving to DB</Typography>
+                      <Typography className={styles.benchmarkValue}>
+                        {uploadSummary.processingTime.saving != null ? `${uploadSummary.processingTime.saving.toFixed(1)} ms` : 'N/A'}
+                      </Typography>
+                    </Box>
+                    <Box className={styles.benchmarkCard}>
+                      <Typography className={styles.benchmarkLabel}>Total Time</Typography>
+                      <Typography className={styles.benchmarkValue}>
+                        {uploadSummary.processingTime.total != null ? `${(uploadSummary.processingTime.total / 1000).toFixed(2)} s` : 'N/A'}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Box>
+              )}
+
               {uploadSummary.invalidRows > 0 && (
                 <Alert severity="warning" className={styles.warningAlert}>
                   {uploadSummary.invalidRows} records contained validation errors and were routed to the Error Logs at the bottom of the dashboard.
@@ -428,6 +558,11 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
               </Box>
 
               <Alert severity="error" className={styles.fullErrorAlert}>
+                {failedStage && (
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1.5 }}>
+                    Failed Stage: <span style={{ color: '#fda4af', fontWeight: 800 }}>{failedStageKeyMap[failedStage] || failedStage}</span>
+                  </Typography>
+                )}
                 <Typography variant="subtitle2" fontWeight={700}>
                   Diagnostic Message:
                 </Typography>

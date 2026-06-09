@@ -16,10 +16,19 @@ import {
   fetchSummaryAnalytics,
   fetchErrorLogs,
   fetchTimeseriesData,
+  fetchDatasetsList,
 } from './services/analyticsApi';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState(0);
+
+  // Scoped dataset selector states (Requirement 3 & 4)
+  const [selectedDatasetId, setSelectedDatasetId] = useState('');
+  const [datasetsList, setDatasetsList] = useState([]);
+  const [activeDatasetInfo, setActiveDatasetInfo] = useState({
+    name: 'No active dataset',
+    timestamp: null,
+  });
 
   const [rawSummaryData, setRawSummaryData] = useState(null);
   const [summaryCards, setSummaryCards] = useState(defaultSummaryCards);
@@ -67,22 +76,72 @@ export default function App() {
     setToast((prev) => ({ ...prev, open: false }));
   };
 
-  const loadSummary = useCallback(async () => {
+  // Fetch list of all uploaded datasets for the header dropdown
+  const loadDatasets = useCallback(async () => {
+    try {
+      const list = await fetchDatasetsList();
+      setDatasetsList(list);
+    } catch (error) {
+      console.error('Failed to load datasets list:', error);
+    }
+  }, []);
+
+  // Unified data loader for the active/selected dataset (Requirement 4 & 5)
+  const loadAllData = useCallback(async (targetId) => {
     setSummaryLoading(true);
     setSummaryError('');
+    setErrorLogsLoading(true);
+    setErrorLogsError('');
+    setTimeseriesLoading(true);
+    setTimeseriesError('');
 
     try {
-      const summaryData = await fetchSummaryAnalytics();
+      // 1. Fetch summary stats scoped to targetId (falls back to latest on backend if empty)
+      const summaryData = await fetchSummaryAnalytics(targetId);
       setRawSummaryData(summaryData);
-      
+
+      // Auto-align the targetId with the database-returned active ID (important for default loads)
+      const activeId = summaryData.datasetId;
+      if (activeId && targetId !== activeId) {
+        setSelectedDatasetId(activeId);
+      }
+
+      // Update name and timestamp displays
+      setActiveDatasetInfo({
+        name: summaryData.datasetName,
+        timestamp: summaryData.uploadTimestamp,
+      });
+
       const total = summaryData.totalRecords ?? 0;
       setDatasetStatus({
         label: total > 0 ? 'Dataset active' : 'No data uploaded',
         value: `${total.toLocaleString()} rows`,
         tone: total > 0 ? 'success' : 'warning',
       });
+
+      // 2. Fetch error logs and timeseries data in parallel scoped only to the active ID
+      if (activeId) {
+        const [logs, timeseries] = await Promise.all([
+          fetchErrorLogs(activeId),
+          fetchTimeseriesData(5000, activeId),
+        ]);
+        setErrorLogs(logs);
+        setTimeseriesData(timeseries);
+
+        // Debugging logs to console (Requirement 11)
+        console.log('--- Scoped Timeseries Debugging ---');
+        console.log('Active Dataset Name:', summaryData.datasetName);
+        console.log('Active Dataset ID:', activeId);
+        console.log('Record count:', timeseries.length);
+        if (timeseries.length > 0) {
+          console.log('API response fields:', Object.keys(timeseries[0] || {}));
+        }
+      } else {
+        setErrorLogs([]);
+        setTimeseriesData([]);
+      }
     } catch (error) {
-      const message = error?.response?.data?.error || error?.message || 'Failed to load summary analytics';
+      const message = error?.response?.data?.error || error?.message || 'Failed to load dataset analytics';
       setSummaryError(message);
       setRawSummaryData(null);
       setSummaryCards(defaultSummaryCards);
@@ -91,60 +150,34 @@ export default function App() {
         value: 'N/A',
         tone: 'error',
       });
-    } finally {
-      setSummaryLoading(false);
-    }
-  }, []);
-
-  const loadErrorLogs = useCallback(async () => {
-    setErrorLogsLoading(true);
-    setErrorLogsError('');
-
-    try {
-      const logs = await fetchErrorLogs();
-      setErrorLogs(logs);
-    } catch (error) {
-      const message = error?.response?.data?.error || error?.message || 'Failed to load error logs';
-      setErrorLogsError(message);
       setErrorLogs([]);
-    } finally {
-      setErrorLogsLoading(false);
-    }
-  }, []);
-
-  const loadTimeseries = useCallback(async () => {
-    setTimeseriesLoading(true);
-    setTimeseriesError('');
-
-    try {
-      // Fetch dynamic record count limit (e.g. 5000 records)
-      const data = await fetchTimeseriesData(5000);
-      setTimeseriesData(data);
-
-      // Print telemetry debugging logs to console (Requirement 11)
-      console.log('--- Timeseries API Payload Debugging ---');
-      console.log('API response fields:', Object.keys(data[0] || {}));
-      console.log('Discovered available speed metrics:', data.length > 0 && data[0].windSpeeds ? Object.keys(data[0].windSpeeds) : []);
-      console.log('Discovered available direction metrics:', data.length > 0 && data[0].windDirections ? Object.keys(data[0].windDirections) : []);
-      console.log('Discovered available raw metrics:', data.length > 0 && data[0].rawRowData ? Object.keys(data[0].rawRowData) : []);
-    } catch (error) {
-      const message = error?.response?.data?.error || error?.message || 'Failed to load timeseries data';
-      setTimeseriesError(message);
       setTimeseriesData([]);
     } finally {
+      setSummaryLoading(false);
+      setErrorLogsLoading(false);
       setTimeseriesLoading(false);
     }
   }, []);
 
-  const handleRefreshAll = useCallback(() => {
-    loadSummary();
-    loadErrorLogs();
-    loadTimeseries();
-  }, [loadSummary, loadErrorLogs, loadTimeseries]);
-
+  // Trigger loads when active dataset ID changes
   useEffect(() => {
-    handleRefreshAll();
-  }, [handleRefreshAll]);
+    loadAllData(selectedDatasetId);
+  }, [selectedDatasetId, loadAllData]);
+
+  // Initial load of the datasets dropdown list
+  useEffect(() => {
+    loadDatasets();
+  }, [loadDatasets]);
+
+  // Auto-switch view to the newly uploaded dataset (Requirement 7)
+  const handleUploadSuccess = useCallback(async (newDatasetId) => {
+    await loadDatasets();
+    if (newDatasetId) {
+      setSelectedDatasetId(newDatasetId);
+    } else {
+      loadAllData(selectedDatasetId);
+    }
+  }, [loadDatasets, loadAllData, selectedDatasetId]);
 
   // Format error logs to match expectation of ErrorLogsTable
   const formattedErrorLogs = errorLogs.map((log) => ({
@@ -163,12 +196,16 @@ export default function App() {
         <DashboardHeader
           status={datasetStatus}
           onUploadClick={() => setIsUploadOpen(true)}
+          datasetsList={datasetsList}
+          selectedDatasetId={selectedDatasetId}
+          onDatasetChange={setSelectedDatasetId}
+          activeDatasetInfo={activeDatasetInfo}
         />
         <SummarySection
           cards={summaryCards}
           isLoading={summaryLoading}
           errorMessage={summaryError}
-          onRetry={loadSummary}
+          onRetry={() => loadAllData(selectedDatasetId)}
         />
         <GraphTabsBar
           tabs={graphTabs}
@@ -190,7 +227,7 @@ export default function App() {
       <CsvUploadModal
         open={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
-        onUploadSuccess={handleRefreshAll}
+        onUploadSuccess={handleUploadSuccess}
         showToast={showToast}
       />
 
