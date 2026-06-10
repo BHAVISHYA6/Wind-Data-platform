@@ -27,6 +27,8 @@ const ErrorLogSchema = new mongoose.Schema(
 	}
 );
 
+ErrorLogSchema.index({ datasetId: 1, createdAt: -1 });
+
 const ErrorLog = mongoose.model('ErrorLog', ErrorLogSchema);
 
 module.exports = ErrorLog;

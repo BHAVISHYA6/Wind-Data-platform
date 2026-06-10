@@ -28,23 +28,24 @@ import {
   FiX,
   FiLoader,
 } from 'react-icons/fi';
-import { apiClient } from '../../services/analyticsApi';
+import { apiClient, fetchUploadStatus } from '../../services/analyticsApi';
 import styles from './CsvUploadModal.module.css';
 
 const stagesList = [
-  { key: 'uploading', label: 'Uploading file' },
-  { key: 'parsing', label: 'Parsing CSV data' },
-  { key: 'validating', label: 'Validating records' },
-  { key: 'saving', label: 'Saving to database' },
+  { key: 'uploading', label: 'Uploading' },
+  { key: 'processing', label: 'Processing' },
+  { key: 'validating', label: 'Validating' },
+  { key: 'saving', label: 'Saving' },
 ];
 
-const stageOrder = ['uploading', 'parsing', 'validating', 'saving', 'completed'];
+const stageOrder = ['uploading', 'processing', 'validating', 'saving', 'completed'];
 
 const failedStageKeyMap = {
-  initialization: 'Uploading file',
-  parsing: 'Parsing CSV data',
-  validation: 'Validating records',
-  saving: 'Saving to database',
+  initialization: 'Uploading',
+  processing: 'Processing',
+  validation: 'Validating',
+  validating: 'Validating',
+  saving: 'Saving',
 };
 
 export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToast }) {
@@ -56,10 +57,11 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
   const [previewRows, setPreviewRows] = useState([]);
   const [uploadSummary, setUploadSummary] = useState(null);
   const [errorDetails, setErrorDetails] = useState('');
-  const [currentProcessingStage, setCurrentProcessingStage] = useState('idle'); // 'idle' | 'uploading' | 'parsing' | 'validating' | 'saving' | 'completed'
+  const [currentProcessingStage, setCurrentProcessingStage] = useState('idle'); // 'idle' | 'uploading' | 'processing' | 'validating' | 'saving' | 'completed'
   const [failedStage, setFailedStage] = useState('');
 
   const inputRef = useRef(null);
+  const pollingIntervalRef = useRef(null);
 
   // Reset modal state on close/open
   useEffect(() => {
@@ -68,7 +70,20 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
     }
   }, [open]);
 
+  // Clean up polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, []);
+
   const resetState = () => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
     setFile(null);
     setDragActive(false);
     setUploadStatus('idle');
@@ -81,26 +96,64 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
     setFailedStage('');
   };
 
-  // Optimistic transition for stages at 100% upload progress (waiting for server response)
-  useEffect(() => {
-    let timer1;
-    let timer2;
-    if (uploadStatus === 'uploading' && uploadProgress === 100) {
-      setCurrentProcessingStage('parsing');
-      
-      timer1 = setTimeout(() => {
-        setCurrentProcessingStage('validating');
-      }, 1500);
-      
-      timer2 = setTimeout(() => {
-        setCurrentProcessingStage('saving');
-      }, 3500);
+  const startStatusPolling = (datasetId) => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
     }
-    return () => {
-      clearTimeout(timer1);
-      clearTimeout(timer2);
-    };
-  }, [uploadProgress, uploadStatus]);
+
+    pollingIntervalRef.current = setInterval(async () => {
+      try {
+        const statusData = await fetchUploadStatus(datasetId);
+
+        if (statusData.status === 'processing') {
+          setUploadProgress(statusData.progress || 0);
+          
+          let mappedStage = 'processing';
+          if (statusData.stage === 'validating') {
+            mappedStage = 'validating';
+          } else if (statusData.stage === 'saving') {
+            mappedStage = 'saving';
+          }
+          setCurrentProcessingStage(mappedStage);
+        } else if (statusData.status === 'completed') {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+
+          setUploadSummary({
+            totalRows: statusData.totalRows ?? 0,
+            validRows: statusData.validRows ?? 0,
+            invalidRows: statusData.invalidRows ?? 0,
+            processingTime: statusData.processingTime,
+          });
+          setUploadStatus('success');
+          setCurrentProcessingStage('completed');
+          setUploadProgress(100);
+
+          showToast({
+            severity: 'success',
+            message: `Successfully uploaded dataset: ${statusData.validRows ?? 0} valid rows imported!`,
+          });
+
+          if (onUploadSuccess) {
+            onUploadSuccess(datasetId);
+          }
+        } else if (statusData.status === 'failed') {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+
+          setErrorDetails(statusData.errorDetails || 'Failed to process CSV file');
+          setFailedStage(statusData.stage || '');
+          setUploadStatus('error');
+          showToast({
+            severity: 'error',
+            message: `Processing failed: ${statusData.errorDetails || 'Error occurred during processing'}`,
+          });
+        }
+      } catch (pollError) {
+        console.error('Error polling status:', pollError);
+      }
+    }, 1000);
+  };
 
   // Simple CSV parser for browser preview
   const handleCSVPreview = (fileObject) => {
@@ -225,29 +278,14 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
           if (percentCompleted < 100) {
             setCurrentProcessingStage('uploading');
           } else {
-            setCurrentProcessingStage('parsing');
+            setCurrentProcessingStage('processing');
           }
         },
       });
 
       if (response.data && response.data.success) {
-        setUploadSummary({
-          totalRows: response.data.totalRows ?? 0,
-          validRows: response.data.validRows ?? 0,
-          invalidRows: response.data.invalidRows ?? 0,
-          processingTime: response.data.processingTime,
-        });
-        setUploadStatus('success');
-        setCurrentProcessingStage('completed');
-        showToast({
-          severity: 'success',
-          message: `Successfully uploaded dataset: ${response.data.validRows} valid rows imported!`,
-        });
-
-        // Trigger dashboard reload callback with new dataset ID
-        if (onUploadSuccess) {
-          onUploadSuccess(response.data.datasetId);
-        }
+        const datasetId = response.data.datasetId;
+        startStatusPolling(datasetId);
       } else {
         throw new Error(response.data?.message || 'Server did not report success');
       }
@@ -403,7 +441,7 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
               </Box>
               <Typography variant="h6" className={styles.progressTitle}>
                 {currentProcessingStage === 'uploading' && `Uploading file... (${uploadProgress}%)`}
-                {currentProcessingStage === 'parsing' && 'Parsing CSV content...'}
+                {currentProcessingStage === 'processing' && 'Processing CSV content...'}
                 {currentProcessingStage === 'validating' && 'Validating wind records...'}
                 {currentProcessingStage === 'saving' && 'Saving to database...'}
                 {currentProcessingStage === 'completed' && 'Processing completed!'}

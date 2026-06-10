@@ -39,6 +39,8 @@ const WindDataSchema = new mongoose.Schema(
 	}
 );
 
+WindDataSchema.index({ datasetId: 1, timestamp: 1 });
+
 const WindData = mongoose.model('WindData', WindDataSchema);
 
 module.exports = WindData;

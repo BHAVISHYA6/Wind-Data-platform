@@ -1,26 +1,12 @@
-const fs = require('fs').promises;
+const fs = require('fs');
+const fsPromises = fs.promises;
+const mongoose = require('mongoose');
 const Papa = require('papaparse');
 const WindData = require('../models/WindData');
 const ErrorLog = require('../models/ErrorLog');
 const Dataset = require('../models/Dataset');
-const { mapWindTurbineCsvRows } = require('../utils/columnMapper');
+const { mapWindTurbineCsvRows, mapHeader } = require('../utils/columnMapper');
 const { isBlank, isWindSpeedField, isWindDirectionField, validateWindTurbineRow } = require('../utils/validator');
-
-const parseCsv = (csvContent) =>
-	new Promise((resolve, reject) => {
-		Papa.parse(csvContent, {
-			header: true,
-			skipEmptyLines: true,
-			complete: (result) => {
-				if (result.errors && result.errors.length > 0) {
-					return reject(new Error(result.errors[0].message || 'CSV parsing failed'));
-				}
-
-				return resolve(result.data || []);
-			},
-			error: (error) => reject(error),
-		});
-	});
 
 const toNumber = (value) => {
 	if (isBlank(value)) {
@@ -78,134 +64,297 @@ const buildWindDataDocument = (row, rawRowData) => {
 	};
 };
 
+const countLines = (filePath) => {
+	return new Promise((resolve, reject) => {
+		let count = 0;
+		const stream = fs.createReadStream(filePath);
+		stream.on('data', (chunk) => {
+			for (let i = 0; i < chunk.length; ++i) {
+				if (chunk[i] === 10) { // 10 is '\n'
+					count++;
+				}
+			}
+		});
+		stream.on('end', () => {
+			resolve(count);
+		});
+		stream.on('error', (err) => {
+			reject(err);
+		});
+	});
+};
+
+const processDatasetInBackground = async (datasetId, filePath) => {
+	const t_start = performance.now();
+	let totalValidationTime = 0;
+	let totalSavingTime = 0;
+
+	let totalRows = 0;
+	let processedRows = 0;
+	let validRows = 0;
+	let invalidRows = 0;
+
+	const handleFailure = async (err) => {
+		console.error('Error during background CSV processing:', err);
+		try {
+			await Dataset.findByIdAndUpdate(datasetId, {
+				status: 'failed',
+				stage: 'failed',
+				errorDetails: err.message || 'Unknown processing error',
+			});
+		} catch (dbErr) {
+			console.error('Failed to update dataset failure status in DB:', dbErr);
+		} finally {
+			await fsPromises.unlink(filePath).catch(() => {});
+		}
+	};
+
+	const processBatch = async (batch, startIndex) => {
+		const t_val_start = performance.now();
+		const validDocuments = [];
+		const invalidDocuments = [];
+
+		const mapRowHeaders = (row) => {
+			return Object.entries(row).reduce((mappedRow, [key, value]) => {
+				const mappedKey = mapHeader(key);
+				mappedRow[mappedKey] = value;
+				return mappedRow;
+			}, {});
+		};
+
+		batch.forEach(({ rawRow }, index) => {
+			const actualIndex = startIndex + index;
+			const mappedRow = mapRowHeaders(rawRow);
+			const validationResult = validateWindTurbineRow(mappedRow, actualIndex);
+
+			if (validationResult.valid) {
+				const doc = buildWindDataDocument(mappedRow, rawRow);
+				doc.datasetId = datasetId;
+				validDocuments.push(doc);
+			} else {
+				invalidDocuments.push({
+					datasetId,
+					rowNumber: actualIndex + 1,
+					validationErrors: validationResult.errors,
+					rawRowData: rawRow,
+				});
+			}
+		});
+
+		const valTime = performance.now() - t_val_start;
+
+		const t_db_start = performance.now();
+		if (validDocuments.length > 0) {
+			await WindData.insertMany(validDocuments, { ordered: false });
+		}
+		if (invalidDocuments.length > 0) {
+			await ErrorLog.insertMany(invalidDocuments, { ordered: false });
+		}
+		const dbTime = performance.now() - t_db_start;
+
+		return {
+			validCount: validDocuments.length,
+			invalidCount: invalidDocuments.length,
+			valTime,
+			dbTime,
+		};
+	};
+
+	try {
+		// 1. Initial count lines for totalRows calculation
+		const totalLines = await countLines(filePath);
+		totalRows = Math.max(0, totalLines - 1);
+
+		await Dataset.findByIdAndUpdate(datasetId, {
+			totalRows,
+			stage: 'processing',
+			progress: 0,
+		});
+
+		const readStream = fs.createReadStream(filePath);
+		const BATCH_SIZE = 2000;
+		let rowBuffer = [];
+
+		Papa.parse(readStream, {
+			header: true,
+			skipEmptyLines: true,
+			step: (results, parser) => {
+				rowBuffer.push({ rawRow: results.data });
+
+				if (rowBuffer.length >= BATCH_SIZE) {
+					parser.pause();
+					const currentBatch = rowBuffer;
+					rowBuffer = [];
+
+					Dataset.findByIdAndUpdate(datasetId, { stage: 'validating' })
+						.then(() => processBatch(currentBatch, processedRows))
+						.then(async (result) => {
+							processedRows += currentBatch.length;
+							validRows += result.validCount;
+							invalidRows += result.invalidCount;
+							totalValidationTime += result.valTime;
+							totalSavingTime += result.dbTime;
+
+							const progress = totalRows > 0 ? Math.min(99, Math.round((processedRows / totalRows) * 100)) : 0;
+
+							await Dataset.findByIdAndUpdate(datasetId, {
+								processedRows,
+								validRows,
+								invalidRows,
+								progress,
+								stage: 'processing',
+							});
+
+							parser.resume();
+						})
+						.catch(async (err) => {
+							parser.abort();
+							await handleFailure(err);
+						});
+				}
+			},
+			complete: async () => {
+				try {
+					if (rowBuffer.length > 0) {
+						const currentBatch = rowBuffer;
+						rowBuffer = [];
+
+						await Dataset.findByIdAndUpdate(datasetId, { stage: 'validating' });
+						const result = await processBatch(currentBatch, processedRows);
+
+						processedRows += currentBatch.length;
+						validRows += result.validCount;
+						invalidRows += result.invalidCount;
+						totalValidationTime += result.valTime;
+						totalSavingTime += result.dbTime;
+					}
+
+					const t_total = performance.now() - t_start;
+					const t_parse = Math.max(0, t_total - totalValidationTime - totalSavingTime);
+
+					await Dataset.findByIdAndUpdate(datasetId, {
+						status: 'completed',
+						stage: 'completed',
+						progress: 100,
+						totalRows: processedRows, // finalize with the actual rows processed
+						processedRows,
+						validRows,
+						invalidRows,
+						processingTime: {
+							parsing: parseFloat(t_parse.toFixed(2)),
+							validation: parseFloat(totalValidationTime.toFixed(2)),
+							saving: parseFloat(totalSavingTime.toFixed(2)),
+							total: parseFloat(t_total.toFixed(2)),
+						},
+					});
+
+					// Telemetry console logging
+					console.log('--- CSV Processing Benchmarks ---');
+					console.log(`Dataset ID: ${datasetId}`);
+					console.log(`Parsing Time: ${t_parse.toFixed(2)}ms`);
+					console.log(`Validation Time: ${totalValidationTime.toFixed(2)}ms`);
+					console.log(`Database Insertion Time: ${totalSavingTime.toFixed(2)}ms`);
+					console.log(`Total Execution Time: ${t_total.toFixed(2)}ms\n`);
+
+				} catch (err) {
+					await handleFailure(err);
+				} finally {
+					await fsPromises.unlink(filePath).catch(() => {});
+				}
+			},
+			error: async (err) => {
+				await handleFailure(err);
+			},
+		});
+
+	} catch (error) {
+		await handleFailure(error);
+	}
+};
+
 const uploadCsv = async (req, res) => {
 	const uploadedFilePath = req.file && req.file.path;
-	let currentStage = 'initialization';
-	const t_start = performance.now();
-	let t_parse = 0;
-	let t_val = 0;
-	let t_db = 0;
 
 	try {
 		if (!req.file) {
 			return res.status(400).json({
 				success: false,
-				stage: currentStage,
 				message: 'No CSV file uploaded',
 			});
 		}
 
-		// Explicitly expand request & connection timeout thresholds to 120s
-		req.setTimeout(120000);
-		res.setTimeout(120000);
-
-		// Create a unique Dataset record
+		// Create a unique Dataset record immediately in processing state
 		const newDataset = new Dataset({
 			filename: req.file.originalname,
 			uploadTimestamp: new Date(),
+			status: 'processing',
+			stage: 'initialization',
+			progress: 0,
 		});
 		await newDataset.save();
 		const datasetId = newDataset._id;
 
-		currentStage = 'parsing';
-		const t_parse_start = performance.now();
-		const csvContent = await fs.readFile(uploadedFilePath, 'utf8');
-		const parsedRows = await parseCsv(csvContent);
-		const mappedRows = mapWindTurbineCsvRows(parsedRows);
-		t_parse = performance.now() - t_parse_start;
+		// Kick off background processing asynchronously
+		processDatasetInBackground(datasetId, uploadedFilePath);
 
-		currentStage = 'validation';
-		const t_val_start = performance.now();
-		const validDocuments = [];
-		const invalidDocuments = [];
-
-		// Split validations in batches of 1000, yielding back to unblock the Event Loop
-		const batchSize = 1000;
-		for (let i = 0; i < mappedRows.length; i += batchSize) {
-			const chunk = mappedRows.slice(i, i + batchSize);
-			const chunkParsed = parsedRows.slice(i, i + batchSize);
-
-			chunk.forEach((row, index) => {
-				const actualIndex = i + index;
-				const rawRowData = chunkParsed[index];
-				const validationResult = validateWindTurbineRow(row, actualIndex);
-
-				if (validationResult.valid) {
-					const doc = buildWindDataDocument(row, rawRowData);
-					doc.datasetId = datasetId;
-					validDocuments.push(doc);
-				} else {
-					invalidDocuments.push({
-						datasetId,
-						rowNumber: actualIndex + 1,
-						validationErrors: validationResult.errors,
-						rawRowData,
-					});
-				}
-			});
-
-			// Yield back execution
-			await new Promise((resolve) => setImmediate(resolve));
-		}
-		t_val = performance.now() - t_val_start;
-
-		currentStage = 'saving';
-		const t_db_start = performance.now();
-		
-		// Batch insert valid records to avoid memory bloating and DB lockup
-		for (let i = 0; i < validDocuments.length; i += batchSize) {
-			const batch = validDocuments.slice(i, i + batchSize);
-			await WindData.insertMany(batch, { ordered: false });
-			await new Promise((resolve) => setImmediate(resolve));
-		}
-
-		// Batch insert invalid records
-		for (let i = 0; i < invalidDocuments.length; i += batchSize) {
-			const batch = invalidDocuments.slice(i, i + batchSize);
-			await ErrorLog.insertMany(batch, { ordered: false });
-			await new Promise((resolve) => setImmediate(resolve));
-		}
-		t_db = performance.now() - t_db_start;
-
-		const t_total = performance.now() - t_start;
-
-		// Telemetry console logging
-		console.log('--- CSV Processing Benchmarks ---');
-		console.log(`Dataset ID: ${datasetId}`);
-		console.log(`Parsing Time: ${t_parse.toFixed(2)}ms`);
-		console.log(`Validation Time: ${t_val.toFixed(2)}ms`);
-		console.log(`Database Insertion Time: ${t_db.toFixed(2)}ms`);
-		console.log(`Total Execution Time: ${t_total.toFixed(2)}ms\n`);
-
+		// Immediately return acknowledgement to the client
 		return res.status(200).json({
 			success: true,
-			datasetId: datasetId,
-			datasetName: newDataset.filename,
-			uploadTimestamp: newDataset.uploadTimestamp,
-			totalRows: mappedRows.length,
-			validRows: validDocuments.length,
-			invalidRows: invalidDocuments.length,
-			processingTime: {
-				parsing: parseFloat(t_parse.toFixed(2)),
-				validation: parseFloat(t_val.toFixed(2)),
-				saving: parseFloat(t_db.toFixed(2)),
-				total: parseFloat(t_total.toFixed(2)),
-			},
+			datasetId: datasetId.toString(),
+			status: 'processing',
 		});
 	} catch (error) {
-		console.error(`CSV Processing failed during stage: ${currentStage}`, error);
+		console.error(`Failed to initiate CSV upload:`, error);
+		if (uploadedFilePath) {
+			await fsPromises.unlink(uploadedFilePath).catch(() => {});
+		}
 		return res.status(500).json({
 			success: false,
-			stage: currentStage,
 			message: error.message || 'Failed to process CSV upload',
 		});
-	} finally {
-		if (uploadedFilePath) {
-			await fs.unlink(uploadedFilePath).catch(() => {});
+	}
+};
+
+const getUploadStatus = async (req, res) => {
+	try {
+		const { datasetId } = req.params;
+		if (!mongoose.Types.ObjectId.isValid(datasetId)) {
+			return res.status(400).json({
+				success: false,
+				message: 'Invalid dataset ID',
+			});
 		}
+
+		const dataset = await Dataset.findById(datasetId);
+		if (!dataset) {
+			return res.status(404).json({
+				success: false,
+				message: 'Dataset not found',
+			});
+		}
+
+		return res.status(200).json({
+			status: dataset.status,
+			stage: dataset.stage,
+			progress: dataset.progress,
+			totalRows: dataset.totalRows,
+			processedRows: dataset.processedRows,
+			validRows: dataset.validRows,
+			invalidRows: dataset.invalidRows,
+			errorDetails: dataset.errorDetails,
+			processingTime: dataset.processingTime,
+		});
+	} catch (error) {
+		console.error('Error fetching dataset status:', error);
+		return res.status(500).json({
+			success: false,
+			message: error.message || 'Failed to fetch dataset status',
+		});
 	}
 };
 
 module.exports = {
 	uploadCsv,
+	getUploadStatus,
 };
+

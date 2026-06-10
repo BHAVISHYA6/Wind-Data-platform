@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
-const { uploadCsv } = require('../controllers/uploadController');
+const { uploadCsv, getUploadStatus } = require('../controllers/uploadController');
 
 const router = express.Router();
 
@@ -37,5 +37,6 @@ const upload = multer({
 });
 
 router.post('/upload', upload.single('file'), uploadCsv);
+router.get('/datasets/:datasetId/status', getUploadStatus);
 
 module.exports = router;

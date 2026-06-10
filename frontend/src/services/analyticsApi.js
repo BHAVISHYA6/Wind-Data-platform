@@ -38,3 +38,8 @@ export const fetchDatasetsList = async () => {
   return response.data?.data ?? response.data ?? [];
 };
 
+export const fetchUploadStatus = async (datasetId) => {
+  const response = await apiClient.get(`/api/datasets/${datasetId}/status`);
+  return response.data;
+};
+
