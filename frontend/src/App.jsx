@@ -217,6 +217,7 @@ export default function App() {
           timeseriesData={timeseriesData}
           isLoading={timeseriesLoading}
           hasError={timeseriesError}
+          summaryData={rawSummaryData}
         />
         
         {/* Render live error logs table */}

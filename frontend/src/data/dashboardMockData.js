@@ -9,6 +9,7 @@ import {
   FiCompass,
   FiTrendingUp,
   FiSliders,
+  FiGrid,
 } from 'react-icons/fi';
 
 export const datasetStatus = {
@@ -153,6 +154,7 @@ export const buildSummaryCards = (summaryData, timeseriesData) => {
 };
 
 export const graphTabs = [
+  { label: 'KPI Dashboard', icon: FiGrid },
   { label: 'Wind Speed', icon: FiWind },
   { label: 'Wind Direction', icon: FiCompass },
   { label: 'Temperature', icon: FiThermometer },

@@ -14,7 +14,6 @@ import {
   InputLabel,
   Skeleton,
   Chip,
-  Alert,
 } from '@mui/material';
 import {
   FiTrendingUp,
@@ -22,13 +21,62 @@ import {
   FiAlertCircle,
   FiPlay,
   FiSliders,
+  FiWind,
+  FiCompass,
+  FiThermometer,
+  FiDroplet,
+  FiActivity,
+  FiCheckCircle,
+  FiAlertTriangle,
+  FiGrid,
 } from 'react-icons/fi';
 import styles from './GraphWorkspace.module.css';
+import { graphTabs } from '../../data/dashboardMockData';
 
 // Lazy load the Plotly component wrapper
 const LazyPlot = lazy(() => import('../chart/PlotlyWrapper'));
 
-export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, hasError }) {
+// --- Math & Analytics Helpers ---
+
+// Lanczos approximation for Gamma function
+const gamma = (x) => {
+  const p = [
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+    771.32342877765313, -176.61502916214059, 12.507343278686905,
+    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7
+  ];
+  const g = 7;
+  if (x < 0.5) return Math.PI / (Math.sin(Math.PI * x) * gamma(1 - x));
+  x -= 1;
+  let a = p[0];
+  let t = x + g + 0.5;
+  for (let i = 1; i < p.length; i++) {
+    a += p[i] / (x + i);
+  }
+  return Math.sqrt(2 * Math.PI) * Math.pow(t, x + 0.5) * Math.exp(-t) * a;
+};
+
+// 16-sector Wind Direction helper
+const getDirectionSector = (deg) => {
+  if (deg === null || deg === undefined || isNaN(deg)) return 'N/A';
+  deg = (deg % 360 + 360) % 360; // normalize
+  const sectors = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  const index = Math.round(deg / 22.5) % 16;
+  return sectors[index];
+};
+
+// Extract height from column name helper
+const parseHeight = (colName) => {
+  const match = colName.match(/(\d+)\s*m/i) || colName.match(/(\d+)/);
+  return match ? parseInt(match[1], 10) : null;
+};
+
+export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, hasError, summaryData }) {
+  // Resolve current tab label to avoid hardcoded index dependencies
+  const currentTabLabel = useMemo(() => {
+    return graphTabs[activeTab]?.label || 'KPI Dashboard';
+  }, [activeTab]);
+
   // --- Wind Speed Tab States ---
   const [selectedSpeedCols, setSelectedSpeedCols] = useState({});
 
@@ -82,21 +130,58 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
     rawKeys.forEach((key) => {
       const lowerKey = key.toLowerCase();
-      // Skip date/time columns
+      // Skip date/time/timestamp columns
       if (lowerKey.includes('date') || lowerKey.includes('time') || lowerKey === 'timestamp') {
         return;
       }
 
-      if (key.includes('[m/s]')) {
-        windSpeedCols.push(key);
-      } else if (key.includes('[°]')) {
-        windDirectionCols.push(key);
-      } else if (key.includes('[°C]')) {
+      // Check standard deviation / dispersion metrics first to separate them into explorer/additionalCols
+      if (lowerKey.includes('std') || lowerKey.includes('dispersion') || lowerKey.includes('dev')) {
+        additionalCols.push(key);
+      } else if (
+        lowerKey.includes('temp') ||
+        lowerKey.includes('temperature') ||
+        key.includes('[°C]') ||
+        lowerKey.includes('[c]') ||
+        lowerKey.includes('celsius') ||
+        lowerKey.includes('degc')
+      ) {
         temperatureCols.push(key);
-      } else if (key.includes('[%]')) {
+      } else if (
+        lowerKey.includes('direction') ||
+        lowerKey.includes('dir') ||
+        lowerKey.includes('wd') ||
+        lowerKey.includes('wv') ||
+        key.includes('[°]') ||
+        lowerKey.includes('[]') ||
+        lowerKey.includes('\uFFFD') ||
+        lowerKey.includes('[]') ||
+        lowerKey.includes('deg')
+      ) {
+        windDirectionCols.push(key);
+      } else if (
+        lowerKey.includes('hum') ||
+        lowerKey.includes('humidity') ||
+        key.includes('[%]') ||
+        lowerKey.includes('rh')
+      ) {
         humidityCols.push(key);
-      } else if (key.includes('[mbar]')) {
+      } else if (
+        lowerKey.includes('pres') ||
+        lowerKey.includes('pressure') ||
+        key.includes('[mbar]') ||
+        lowerKey.includes('bar') ||
+        lowerKey.includes('hpa') ||
+        lowerKey.includes('atm')
+      ) {
         pressureCols.push(key);
+      } else if (
+        lowerKey.includes('speed') ||
+        lowerKey.includes('ws') ||
+        lowerKey.includes('avg') ||
+        key.includes('[m/s]')
+      ) {
+        windSpeedCols.push(key);
       } else {
         additionalCols.push(key);
       }
@@ -111,6 +196,22 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       ...additionalCols,
     ];
 
+    // Logging to satisfy trace & mapping requirements
+    console.log('=== Trace Data Flow Debug ===');
+    console.log('API Response data count:', timeseriesData.length);
+    if (timeseriesData.length > 0) {
+      console.log('First Record Fields:', Object.keys(firstRow));
+      console.log('First Record rawRowData Keys:', rawKeys);
+    }
+    console.log('Metric Mapping results:');
+    console.log('  • windSpeedCols:', windSpeedCols);
+    console.log('  • windDirectionCols:', windDirectionCols);
+    console.log('  • temperatureCols:', temperatureCols);
+    console.log('  • humidityCols:', humidityCols);
+    console.log('  • pressureCols:', pressureCols);
+    console.log('  • additionalCols:', additionalCols);
+    console.log('=============================');
+
     return {
       count: timeseriesData.length,
       startDate: timeseriesData[0]?.timestamp,
@@ -124,6 +225,293 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       allMetricCols,
     };
   }, [timeseriesData]);
+
+  // --- Dynamic Advanced Wind Resource Analytics ---
+  const windAnalytics = useMemo(() => {
+    if (!timeseriesData || timeseriesData.length === 0) {
+      return {
+        avgSpeed: 0,
+        maxSpeed: 0,
+        minSpeed: 0,
+        overallTI: 0,
+        tiByHeight: [],
+        shearCoefficient: 0,
+        shearTimeseries: [],
+        shearProfile: null,
+        weibull: { k: 0, c: 0, histogram: [], pdf: [], colName: 'N/A' },
+        dominantDirection: 'N/A',
+        dataAvailability: 100,
+        validRecords: 0,
+        invalidRecords: 0,
+      };
+    }
+
+    // --- Data counts & availability ---
+    const validRecords = summaryData?.totalRecords || timeseriesData.length;
+    const invalidRecords = summaryData?.totalErrorLogs || 0;
+    const totalRecords = validRecords + invalidRecords;
+    const dataAvailability = totalRecords > 0 ? (validRecords / totalRecords) * 100 : 100;
+
+    // --- Basic Speed KPIs ---
+    let speedSum = 0;
+    let speedCount = 0;
+    let maxSpeed = -Infinity;
+    let minSpeed = Infinity;
+    const allSpeeds = [];
+
+    timeseriesData.forEach((row) => {
+      datasetMeta.windSpeedCols.forEach((col) => {
+        const val = row.rawRowData?.[col];
+        if (val !== undefined && val !== null && val !== '') {
+          const num = parseFloat(val);
+          if (!isNaN(num)) {
+            speedSum += num;
+            speedCount++;
+            if (num > maxSpeed) maxSpeed = num;
+            if (num < minSpeed) minSpeed = num;
+            allSpeeds.push(num);
+          }
+        }
+      });
+    });
+
+    const avgSpeed = speedCount > 0 ? speedSum / speedCount : 0;
+    maxSpeed = maxSpeed === -Infinity ? 0 : maxSpeed;
+    minSpeed = minSpeed === Infinity ? 0 : minSpeed;
+
+    // --- Turbulence Intensity (TI) ---
+    const speedColsWithHeights = datasetMeta.windSpeedCols.map(col => ({
+      col,
+      height: parseHeight(col)
+    })).filter(x => x.height !== null);
+
+    const tiByHeight = [];
+    let tiSumTotal = 0;
+    let tiCountTotal = 0;
+
+    speedColsWithHeights.forEach(({ col: avgCol, height }) => {
+      const stdCol = datasetMeta.additionalCols.find(col => {
+        const colH = parseHeight(col);
+        const hasStdKeywords = col.toLowerCase().includes('std') || col.toLowerCase().includes('dispersion');
+        return colH === height && hasStdKeywords;
+      });
+
+      if (stdCol) {
+        let sumTi = 0;
+        let countTi = 0;
+        const tiSeries = timeseriesData.map((row) => {
+          const avgVal = parseFloat(row.rawRowData?.[avgCol]);
+          const stdVal = parseFloat(row.rawRowData?.[stdCol]);
+          if (avgVal > 0 && !isNaN(stdVal)) {
+            const ti = stdVal / avgVal;
+            sumTi += ti;
+            countTi++;
+            return ti;
+          }
+          return null;
+        });
+
+        if (countTi > 0) {
+          const avgTIForHeight = sumTi / countTi;
+          tiByHeight.push({
+            height,
+            avgCol,
+            stdCol,
+            avgTI: avgTIForHeight,
+            timeseries: tiSeries
+          });
+          tiSumTotal += avgTIForHeight;
+          tiCountTotal++;
+        }
+      }
+    });
+
+    let overallTI = 0;
+    if (tiCountTotal > 0) {
+      overallTI = tiSumTotal / tiCountTotal;
+    } else if (allSpeeds.length > 1 && avgSpeed > 0) {
+      // Fallback: Overall timeseries SD / Mean
+      let varSum = 0;
+      allSpeeds.forEach(v => { varSum += (v - avgSpeed) ** 2; });
+      const overallStd = Math.sqrt(varSum / (allSpeeds.length - 1));
+      overallTI = overallStd / avgSpeed;
+    }
+
+    // --- Wind Shear Exponent (alpha) ---
+    const uniqueHeights = [...new Set(speedColsWithHeights.map(x => x.height))].sort((a, b) => a - b);
+    let shearCoefficient = 0;
+    const shearTimeseries = [];
+    let shearProfile = null;
+
+    if (uniqueHeights.length >= 2) {
+      const h1 = uniqueHeights[0];
+      const h2 = uniqueHeights[uniqueHeights.length - 1];
+      const col1 = speedColsWithHeights.find(x => x.height === h1).col;
+      const col2 = speedColsWithHeights.find(x => x.height === h2).col;
+
+      let alphaSum = 0;
+      let alphaCount = 0;
+
+      timeseriesData.forEach((row) => {
+        const v1 = parseFloat(row.rawRowData?.[col1]);
+        const v2 = parseFloat(row.rawRowData?.[col2]);
+        if (v1 > 0 && v2 > 0 && h2 > h1) {
+          const alpha = Math.log(v2 / v1) / Math.log(h2 / h1);
+          alphaSum += alpha;
+          alphaCount++;
+          shearTimeseries.push(alpha);
+        } else {
+          shearTimeseries.push(null);
+        }
+      });
+
+      shearCoefficient = alphaCount > 0 ? alphaSum / alphaCount : 0;
+
+      const observedProfile = uniqueHeights.map(h => {
+        const heightCols = speedColsWithHeights.filter(x => x.height === h);
+        let sumH = 0;
+        let countH = 0;
+        timeseriesData.forEach(row => {
+          heightCols.forEach(hc => {
+            const v = parseFloat(row.rawRowData?.[hc.col]);
+            if (!isNaN(v)) {
+              sumH += v;
+              countH++;
+            }
+          });
+        });
+        return {
+          height: h,
+          avgSpeed: countH > 0 ? sumH / countH : 0
+        };
+      });
+
+      const v_ref = observedProfile[0].avgSpeed;
+      const h_ref = observedProfile[0].height;
+      const fittedProfile = [];
+      const maxH = Math.max(...uniqueHeights) + 10;
+      for (let h = 0; h <= maxH; h += 5) {
+        let v = 0;
+        if (h_ref > 0 && v_ref > 0) {
+          v = v_ref * Math.pow(h / h_ref, shearCoefficient);
+        }
+        fittedProfile.push({ height: h, speed: v });
+      }
+
+      shearProfile = {
+        observed: observedProfile,
+        fitted: fittedProfile,
+        hRef: h_ref,
+        vRef: v_ref
+      };
+    }
+
+    // --- Weibull Distribution Fitting ---
+    const activeSpeedKeys = Object.keys(selectedSpeedCols).filter(col => selectedSpeedCols[col]);
+    const weibullCol = activeSpeedKeys[0] || datasetMeta.windSpeedCols[0];
+    let weibull = { k: 0, c: 0, histogram: [], pdf: [], colName: weibullCol || 'N/A' };
+
+    if (weibullCol) {
+      const colValues = [];
+      let colSum = 0;
+      timeseriesData.forEach((row) => {
+        const val = row.rawRowData?.[weibullCol];
+        if (val !== undefined && val !== null && val !== '') {
+          const num = parseFloat(val);
+          if (!isNaN(num)) {
+            colValues.push(num);
+            colSum += num;
+          }
+        }
+      });
+
+      if (colValues.length > 1) {
+        const mu = colSum / colValues.length;
+        let varSum = 0;
+        colValues.forEach(v => { varSum += (v - mu) ** 2; });
+        const sigma = Math.sqrt(varSum / (colValues.length - 1));
+
+        const k = Math.pow(sigma / mu, -1.086);
+        const c = mu / gamma(1 + 1 / k);
+
+        const maxVal = Math.max(...colValues);
+        const binWidth = 1.0;
+        const maxBin = Math.min(25, Math.ceil(maxVal));
+        const binCounts = new Array(maxBin).fill(0);
+
+        colValues.forEach((v) => {
+          const binIdx = Math.floor(v / binWidth);
+          if (binIdx >= 0 && binIdx < maxBin) {
+            binCounts[binIdx]++;
+          }
+        });
+
+        const histogram = binCounts.map((count, idx) => ({
+          binStart: idx * binWidth,
+          binEnd: (idx + 1) * binWidth,
+          density: count / (colValues.length * binWidth),
+        }));
+
+        const pdf = [];
+        const step = 0.25;
+        for (let v = 0; v <= maxBin; v += step) {
+          let f = 0;
+          if (v > 0 && c > 0 && k > 0) {
+            f = (k / c) * Math.pow(v / c, k - 1) * Math.exp(-Math.pow(v / c, k));
+          }
+          pdf.push({ v, f });
+        }
+
+        weibull = { k, c, histogram, pdf, colName: weibullCol };
+      }
+    }
+
+    // --- Dominant Wind Direction ---
+    const sectorsCount = {};
+    let totalDirections = 0;
+    timeseriesData.forEach((row) => {
+      datasetMeta.windDirectionCols.forEach((col) => {
+        const val = row.rawRowData?.[col];
+        if (val !== undefined && val !== null && val !== '') {
+          const num = parseFloat(val);
+          if (!isNaN(num)) {
+            const sector = getDirectionSector(num);
+            sectorsCount[sector] = (sectorsCount[sector] || 0) + 1;
+            totalDirections++;
+          }
+        }
+      });
+    });
+
+    let dominantDirection = 'N/A';
+    let maxDirCount = 0;
+    Object.entries(sectorsCount).forEach(([sector, count]) => {
+      if (count > maxDirCount) {
+        maxDirCount = count;
+        dominantDirection = sector;
+      }
+    });
+    if (totalDirections > 0 && dominantDirection !== 'N/A') {
+      const percentage = ((maxDirCount / totalDirections) * 100).toFixed(1);
+      dominantDirection = `${dominantDirection} (${percentage}%)`;
+    }
+
+    return {
+      avgSpeed,
+      maxSpeed,
+      minSpeed,
+      overallTI,
+      tiByHeight,
+      shearCoefficient,
+      shearTimeseries,
+      shearProfile,
+      weibull,
+      dominantDirection,
+      dataAvailability,
+      validRecords,
+      invalidRecords,
+    };
+  }, [timeseriesData, datasetMeta, summaryData, selectedSpeedCols]);
 
   // Synchronize speed check-state dynamically when dataset updates (selecting first column by default)
   useEffect(() => {
@@ -174,30 +562,30 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
   // Print telemetry debugging logs to console on metric/tab selections
   useEffect(() => {
     let selectedText = '';
-    if (activeTab === 0) {
+    if (currentTabLabel === 'Wind Speed') {
       selectedText = `Speeds: ${Object.keys(selectedSpeedCols).filter(k => selectedSpeedCols[k]).join(', ')}`;
-    } else if (activeTab === 1) {
+    } else if (currentTabLabel === 'Wind Direction') {
       selectedText = `Directions: ${Object.keys(selectedDirectionCols).filter(k => selectedDirectionCols[k]).join(', ')}`;
-    } else if (activeTab === 2) {
+    } else if (currentTabLabel === 'Temperature') {
       selectedText = `Temperature: ${selectedTempCol}`;
-    } else if (activeTab === 3) {
+    } else if (currentTabLabel === 'Humidity') {
       selectedText = `Humidity: ${selectedHumidityCol}`;
-    } else if (activeTab === 4) {
+    } else if (currentTabLabel === 'Pressure') {
       selectedText = `Pressure: ${selectedPressureCol}`;
-    } else if (activeTab === 5) {
-      selectedText = generatedScatterConfig 
+    } else if (currentTabLabel === 'Scatter Analysis') {
+      selectedText = generatedScatterConfig
         ? `Scatter [X: ${generatedScatterConfig.xKey}, Y: ${generatedScatterConfig.yKey}]`
         : 'Scatter config pending';
-    } else if (activeTab === 6) {
+    } else if (currentTabLabel === 'Additional Metrics') {
       selectedText = `Additional: ${selectedAdditionalCol}`;
     }
 
     console.log('--- Visualization State Selection ---');
-    console.log(`Active Tab: ${activeTab}`);
+    console.log(`Active Tab: ${activeTab} (${currentTabLabel})`);
     console.log(`Discovered speed columns: ${datasetMeta.windSpeedCols.join(', ')}`);
     console.log(`Discovered direction columns: ${datasetMeta.windDirectionCols.join(', ')}`);
     console.log(`Selected Metric: ${selectedText}`);
-  }, [activeTab, selectedSpeedCols, selectedDirectionCols, selectedTempCol, selectedHumidityCol, selectedPressureCol, selectedAdditionalCol, generatedScatterConfig, datasetMeta]);
+  }, [activeTab, currentTabLabel, selectedSpeedCols, selectedDirectionCols, selectedTempCol, selectedHumidityCol, selectedPressureCol, selectedAdditionalCol, generatedScatterConfig, datasetMeta]);
 
   // --- Linear Regression Helper for Scatter Analysis ---
   const regressionLine = useMemo(() => {
@@ -254,26 +642,26 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
   // --- Dynamic Selection Lists & Stats Computation ---
   const activeMetrics = useMemo(() => {
-    if (activeTab === 0) {
+    if (currentTabLabel === 'Wind Speed') {
       return Object.keys(selectedSpeedCols).filter(col => selectedSpeedCols[col]);
     }
-    if (activeTab === 1) {
+    if (currentTabLabel === 'Wind Direction') {
       return Object.keys(selectedDirectionCols).filter(col => selectedDirectionCols[col]);
     }
-    if (activeTab === 2) {
+    if (currentTabLabel === 'Temperature') {
       return selectedTempCol ? [selectedTempCol] : [];
     }
-    if (activeTab === 3) {
+    if (currentTabLabel === 'Humidity') {
       return selectedHumidityCol ? [selectedHumidityCol] : [];
     }
-    if (activeTab === 4) {
+    if (currentTabLabel === 'Pressure') {
       return selectedPressureCol ? [selectedPressureCol] : [];
     }
-    if (activeTab === 6) {
+    if (currentTabLabel === 'Additional Metrics') {
       return selectedAdditionalCol ? [selectedAdditionalCol] : [];
     }
     return [];
-  }, [activeTab, selectedSpeedCols, selectedDirectionCols, selectedTempCol, selectedHumidityCol, selectedPressureCol, selectedAdditionalCol]);
+  }, [currentTabLabel, selectedSpeedCols, selectedDirectionCols, selectedTempCol, selectedHumidityCol, selectedPressureCol, selectedAdditionalCol]);
 
   const metricsStats = useMemo(() => {
     if (!timeseriesData || timeseriesData.length === 0 || activeMetrics.length === 0) {
@@ -284,6 +672,8 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     activeMetrics.forEach((metric) => {
       let min = Infinity;
       let max = -Infinity;
+      let sum = 0;
+      let count = 0;
       let hasValue = false;
 
       timeseriesData.forEach((row) => {
@@ -293,6 +683,8 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
           if (Number.isFinite(num)) {
             if (num < min) min = num;
             if (num > max) max = num;
+            sum += num;
+            count++;
             hasValue = true;
           }
         }
@@ -301,6 +693,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       stats[metric] = {
         min: hasValue ? parseFloat(min.toFixed(2)) : 'N/A',
         max: hasValue ? parseFloat(max.toFixed(2)) : 'N/A',
+        avg: hasValue && count > 0 ? parseFloat((sum / count).toFixed(2)) : 'N/A',
       };
     });
 
@@ -347,7 +740,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
   const config = {
     responsive: true,
     displaylogo: false,
-    modeBarButtonsToRemove: [], // Keep all zoom, pan, select, reset options (Requirement 7)
+    modeBarButtonsToRemove: [], // Keep zoom/pan controls
     toImageButtonOptions: {
       format: 'png',
       filename: 'wind_platform_chart',
@@ -360,7 +753,6 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
     setGeneratedScatterConfig({ xKey: scatterX, yKey: scatterY });
   };
 
-  // Check if an array of values contains only empty/null items (Requirement 10)
   const isDataEmpty = (values) => {
     if (!values || values.length === 0) return true;
     return values.every(v => v === null || v === undefined || isNaN(v));
@@ -381,6 +773,68 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
   };
 
   const CHART_COLORS = ['#6ee7f9', '#8b5cf6', '#34d399', '#f59e0b', '#38bdf8', '#fb7185', '#ec4899', '#10b981'];
+
+  // --- Rendering UI KPI Cards ---
+  const renderKpiCard = (title, value, description, Icon, color) => (
+    <Paper
+      className={styles.statsCard}
+      sx={{
+        borderLeft: `4px solid ${color || '#38bdf8'}`,
+        flex: 1,
+        p: 2.2,
+        bgcolor: 'rgba(15, 27, 45, 0.45)',
+        border: '1px solid rgba(255,255,255,0.05)',
+        borderRadius: '16px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        transition: 'transform 0.2s',
+        '&:hover': { transform: 'translateY(-2px)' }
+      }}
+      elevation={0}
+    >
+      <Box>
+        <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 700, fontSize: '0.75rem' }}>
+          {title}
+        </Typography>
+        <Typography variant="h5" sx={{ color: '#eff6ff', fontWeight: 800, mt: 0.5 }}>
+          {value}
+        </Typography>
+        <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.45)', mt: 0.5, fontSize: '0.8rem' }}>
+          {description}
+        </Typography>
+      </Box>
+      <Box sx={{ p: 1.5, borderRadius: '12px', bgcolor: 'rgba(255,255,255,0.05)', color: color || '#38bdf8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon size={22} />
+      </Box>
+    </Paper>
+  );
+
+  const renderMiniKpiCard = (title, value, description, color) => (
+    <Paper
+      className={styles.statsCard}
+      sx={{
+        borderLeft: `3px solid ${color || '#38bdf8'}`,
+        flex: 1,
+        minWidth: '160px',
+        p: 1.5,
+        bgcolor: 'rgba(15, 27, 45, 0.35)',
+        border: '1px solid rgba(255,255,255,0.03)',
+        borderRadius: '12px'
+      }}
+      elevation={0}
+    >
+      <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, fontSize: '0.65rem' }}>
+        {title}
+      </Typography>
+      <Typography variant="h6" sx={{ color: '#eff6ff', fontWeight: 800, mt: 0.2 }}>
+        {value}
+      </Typography>
+      <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)', display: 'block', fontSize: '0.7rem' }}>
+        {description}
+      </Typography>
+    </Paper>
+  );
 
   // --- Rendering Chart Core Logic ---
   const renderChart = () => {
@@ -423,8 +877,29 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
     const timestamps = timeseriesData.map((d) => d.timestamp);
 
-    // TAB 0: Wind Speed overlay
-    if (activeTab === 0) {
+    // KPI Dashboard View
+    if (currentTabLabel === 'KPI Dashboard') {
+      return (
+        <Box sx={{ width: '100%' }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: '1fr 1fr 1fr' }, gap: 2.5 }}>
+            {renderKpiCard('Average Wind Speed', `${windAnalytics.avgSpeed.toFixed(2)} m/s`, 'Mean speed across all height levels', FiWind, '#38bdf8')}
+            {renderKpiCard('Maximum Wind Speed', `${windAnalytics.maxSpeed.toFixed(2)} m/s`, 'Highest recorded wind speed observation', FiTrendingUp, '#fb7185')}
+            {renderKpiCard('Minimum Wind Speed', `${windAnalytics.minSpeed.toFixed(2)} m/s`, 'Lowest recorded wind speed observation', FiSliders, '#f59e0b')}
+            
+            {renderKpiCard('Dominant Direction', windAnalytics.dominantDirection, 'Most frequent wind vector compass sector', FiCompass, '#34d399')}
+            {renderKpiCard('Turbulence Intensity', `${(windAnalytics.overallTI * 100).toFixed(1)}%`, 'Average wind speed standard deviation ratio', FiActivity, '#22d3ee')}
+            {renderKpiCard('Wind Shear Exponent (α)', windAnalytics.shearCoefficient.toFixed(3), 'Vertical wind velocity profile gradient', FiTrendingUp, '#8b5cf6')}
+            
+            {renderKpiCard('Data Availability', `${windAnalytics.dataAvailability.toFixed(1)}%`, 'Percentage of successfully validated records', FiCheckCircle, '#10b981')}
+            {renderKpiCard('Valid Records', windAnalytics.validRecords.toLocaleString(), 'Total database wind speed observations', FiDatabase, '#60a5fa')}
+            {renderKpiCard('Invalid Records', windAnalytics.invalidRecords.toLocaleString(), 'Failing rows written to ErrorLog schema', FiAlertTriangle, '#f43f5e')}
+          </Box>
+        </Box>
+      );
+    }
+
+    // Wind Speed Timeline & Advanced Charts
+    if (currentTabLabel === 'Wind Speed') {
       const activeKeys = Object.keys(selectedSpeedCols).filter(k => selectedSpeedCols[k]);
 
       if (activeKeys.length === 0) {
@@ -461,26 +936,170 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       }
 
       return (
-        <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={680} sx={{ borderRadius: '16px' }} />}>
-          <LazyPlot
-            data={traces}
-            layout={{
-              ...plotlyLayoutDefaults,
-              yaxis: {
-                ...plotlyLayoutDefaults.yaxis,
-                title: { text: 'Wind Speed (m/s)', font: { size: 12 } },
-              },
-            }}
-            config={config}
-            useResizeHandler
-            style={{ width: '100%', height: '680px' }}
-          />
-        </Suspense>
+        <Stack spacing={4} sx={{ width: '100%' }}>
+          <Box sx={{ p: 2, borderRadius: '16px', bgcolor: 'rgba(15, 27, 45, 0.25)', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <Typography variant="h6" sx={{ color: '#eff6ff', fontWeight: 600, mb: 1 }}>
+              Wind Speed Overlay Timeline
+            </Typography>
+            <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={450} sx={{ borderRadius: '16px' }} />}>
+              <LazyPlot
+                data={traces}
+                layout={{
+                  ...plotlyLayoutDefaults,
+                  height: 450,
+                  yaxis: {
+                    ...plotlyLayoutDefaults.yaxis,
+                    title: { text: 'Wind Speed (m/s)', font: { size: 12 } },
+                  },
+                }}
+                config={config}
+                useResizeHandler
+                style={{ width: '100%', height: '450px' }}
+              />
+            </Suspense>
+          </Box>
+
+          <Typography variant="h6" sx={{ color: '#eff6ff', fontWeight: 700, mt: 3, mb: 0.5, borderBottom: '1px solid rgba(255,255,255,0.1)', pb: 1 }}>
+            Advanced Wind Resource Analytics
+          </Typography>
+
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 3.2 }}>
+            {/* Weibull Distribution Fitting */}
+            {windAnalytics.weibull.k > 0 && (
+              <Box sx={{ p: 2, borderRadius: '16px', bgcolor: 'rgba(15, 27, 45, 0.25)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <Typography variant="subtitle1" sx={{ color: '#eff6ff', fontWeight: 600, mb: 1.5 }}>
+                  Weibull Frequency Fit ({windAnalytics.weibull.colName})
+                </Typography>
+                <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
+                  {renderMiniKpiCard('Weibull Shape (k)', windAnalytics.weibull.k.toFixed(2), 'Wind speed variability factor', '#fb7185')}
+                  {renderMiniKpiCard('Weibull Scale (c)', `${windAnalytics.weibull.c.toFixed(2)} m/s`, 'Theoretical average speed factor', '#6ee7f9')}
+                </Stack>
+                <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={320} sx={{ borderRadius: '12px' }} />}>
+                  <LazyPlot
+                    data={[
+                      {
+                        x: windAnalytics.weibull.histogram.map(b => b.binStart + 0.5),
+                        y: windAnalytics.weibull.histogram.map(b => b.density),
+                        type: 'bar',
+                        name: 'Observed Density',
+                        marker: { color: 'rgba(56, 189, 248, 0.35)', line: { color: '#38bdf8', width: 1 } },
+                        hovertemplate: 'Speed Bin: %{x} m/s<br>Frequency: %{y:.3f}<extra></extra>'
+                      },
+                      {
+                        x: windAnalytics.weibull.pdf.map(p => p.v),
+                        y: windAnalytics.weibull.pdf.map(p => p.f),
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: 'Fitted Weibull PDF',
+                        line: { color: '#fb7185', width: 2.5 },
+                        hovertemplate: 'Speed: %{x} m/s<br>PDF Density: %{y:.3f}<extra></extra>'
+                      }
+                    ]}
+                    layout={{
+                      ...plotlyLayoutDefaults,
+                      height: 320,
+                      margin: { t: 15, r: 15, b: 40, l: 50 },
+                      xaxis: { ...plotlyLayoutDefaults.xaxis, title: 'Wind Speed (m/s)' },
+                      yaxis: { ...plotlyLayoutDefaults.yaxis, title: 'Probability Density' },
+                    }}
+                    config={config}
+                    useResizeHandler
+                    style={{ width: '100%', height: '320px' }}
+                  />
+                </Suspense>
+              </Box>
+            )}
+
+            {/* Wind Shear Profile Fit */}
+            {windAnalytics.shearProfile && (
+              <Box sx={{ p: 2, borderRadius: '16px', bgcolor: 'rgba(15, 27, 45, 0.25)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <Typography variant="subtitle1" sx={{ color: '#eff6ff', fontWeight: 600, mb: 1.5 }}>
+                  Wind Velocity Shear Exponent
+                </Typography>
+                <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
+                  {renderMiniKpiCard('Shear Exponent (α)', windAnalytics.shearCoefficient.toFixed(3), `gradient exponent profile`, '#8b5cf6')}
+                </Stack>
+                <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={320} sx={{ borderRadius: '12px' }} />}>
+                  <LazyPlot
+                    data={[
+                      {
+                        x: windAnalytics.shearProfile.observed.map(o => o.avgSpeed),
+                        y: windAnalytics.shearProfile.observed.map(o => o.height),
+                        type: 'scatter',
+                        mode: 'markers+lines',
+                        name: 'Measured mean',
+                        marker: { color: '#34d399', size: 10, symbol: 'square' },
+                        line: { color: '#34d399', width: 1.5, dash: 'dot' },
+                        hovertemplate: 'Observed: %{x:.2f} m/s at %{y}m<extra></extra>'
+                      },
+                      {
+                        x: windAnalytics.shearProfile.fitted.map(f => f.speed),
+                        y: windAnalytics.shearProfile.fitted.map(f => f.height),
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: 'Power Law Fit',
+                        line: { color: '#8b5cf6', width: 2.5 },
+                        hovertemplate: 'Fitted: %{x:.2f} m/s at %{y}m<extra></extra>'
+                      }
+                    ]}
+                    layout={{
+                      ...plotlyLayoutDefaults,
+                      height: 320,
+                      margin: { t: 15, r: 15, b: 40, l: 50 },
+                      xaxis: { ...plotlyLayoutDefaults.xaxis, title: 'Wind Speed (m/s)' },
+                      yaxis: { ...plotlyLayoutDefaults.yaxis, title: 'Height Above Ground (m)' },
+                    }}
+                    config={config}
+                    useResizeHandler
+                    style={{ width: '100%', height: '320px' }}
+                  />
+                </Suspense>
+              </Box>
+            )}
+          </Box>
+
+          {/* Turbulence Intensity Section */}
+          {windAnalytics.tiByHeight.length > 0 && (
+            <Box sx={{ p: 2, borderRadius: '16px', bgcolor: 'rgba(15, 27, 45, 0.25)', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <Typography variant="subtitle1" sx={{ color: '#eff6ff', fontWeight: 600, mb: 1.5 }}>
+                Turbulence Intensity (TI) Timeseries by Height
+              </Typography>
+              <Stack direction="row" spacing={2} useFlexGap flexWrap="wrap" sx={{ mb: 2 }}>
+                {windAnalytics.tiByHeight.map(tiData => (
+                  renderMiniKpiCard(`Avg TI (${tiData.height}m)`, `${(tiData.avgTI * 100).toFixed(1)}%`, `Avg standard deviation ratio`, '#22d3ee')
+                ))}
+              </Stack>
+              <Suspense fallback={<Skeleton variant="rectangular" width="100%" height={320} sx={{ borderRadius: '12px' }} />}>
+                <LazyPlot
+                  data={windAnalytics.tiByHeight.map((tiData, idx) => ({
+                    x: timestamps,
+                    y: tiData.timeseries,
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: `TI at ${tiData.height}m`,
+                    line: { color: CHART_COLORS[idx % CHART_COLORS.length], width: 1.5 },
+                    hovertemplate: `%{x|%d-%m-%Y %H:%M}<br><b>TI ${tiData.height}m:</b> %{y:.1%}<extra></extra>`,
+                  }))}
+                  layout={{
+                    ...plotlyLayoutDefaults,
+                    height: 320,
+                    margin: { t: 15, r: 15, b: 40, l: 50 },
+                    xaxis: { ...plotlyLayoutDefaults.xaxis },
+                    yaxis: { ...plotlyLayoutDefaults.yaxis, title: 'Turbulence Intensity (σ / μ)', tickformat: ',.0%' },
+                  }}
+                  config={config}
+                  useResizeHandler
+                  style={{ width: '100%', height: '320px' }}
+                />
+              </Suspense>
+            </Box>
+          )}
+        </Stack>
       );
     }
 
-    // TAB 1: Wind Direction
-    if (activeTab === 1) {
+    // Wind Direction
+    if (currentTabLabel === 'Wind Direction') {
       const activeKeys = Object.keys(selectedDirectionCols).filter(k => selectedDirectionCols[k]);
 
       if (activeKeys.length === 0) {
@@ -536,8 +1155,8 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    // TAB 2: Temperature
-    if (activeTab === 2) {
+    // Temperature
+    if (currentTabLabel === 'Temperature') {
       if (!selectedTempCol) {
         return renderNoDataWarning('Temperature');
       }
@@ -545,7 +1164,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
         const rawVal = d.rawRowData?.[selectedTempCol];
         return rawVal !== undefined && rawVal !== null ? parseFloat(rawVal) : null;
       });
-      
+
       if (isDataEmpty(values)) {
         return renderNoDataWarning(selectedTempCol);
       }
@@ -581,8 +1200,8 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    // TAB 3: Humidity
-    if (activeTab === 3) {
+    // Humidity
+    if (currentTabLabel === 'Humidity') {
       if (!selectedHumidityCol) {
         return renderNoDataWarning('Humidity');
       }
@@ -627,8 +1246,8 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    // TAB 4: Pressure
-    if (activeTab === 4) {
+    // Pressure
+    if (currentTabLabel === 'Pressure') {
       if (!selectedPressureCol) {
         return renderNoDataWarning('Pressure');
       }
@@ -672,8 +1291,8 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    // TAB 5: Scatter Analysis
-    if (activeTab === 5) {
+    // Scatter Analysis
+    if (currentTabLabel === 'Scatter Analysis') {
       if (!generatedScatterConfig) {
         return (
           <Box className={styles.emptySelectionState}>
@@ -754,7 +1373,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
             }}
             config={{
               ...config,
-              modeBarButtonsToRemove: [], // Allow lasso & box select
+              modeBarButtonsToRemove: [],
             }}
             useResizeHandler
             style={{ width: '100%', height: '680px' }}
@@ -763,8 +1382,8 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    // TAB 6: Additional Metrics
-    if (activeTab === 6) {
+    // Additional Metrics Explorer
+    if (currentTabLabel === 'Additional Metrics') {
       if (!selectedAdditionalCol) {
         return (
           <Box className={styles.emptySelectionState}>
@@ -818,7 +1437,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
   const renderControlPanel = () => {
     if (!timeseriesData || timeseriesData.length === 0) return null;
 
-    if (activeTab === 0) {
+    if (currentTabLabel === 'Wind Speed') {
       return (
         <Paper className={styles.horizontalControlBar} elevation={0}>
           <Typography variant="subtitle2" className={styles.controlTitle}>
@@ -849,7 +1468,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    if (activeTab === 1) {
+    if (currentTabLabel === 'Wind Direction') {
       return (
         <Paper className={styles.horizontalControlBar} elevation={0}>
           <Typography variant="subtitle2" className={styles.controlTitle}>
@@ -880,7 +1499,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    if (activeTab === 2) {
+    if (currentTabLabel === 'Temperature') {
       return (
         <Paper className={styles.horizontalControlBar} elevation={0}>
           <Typography variant="subtitle2" className={styles.controlTitle}>
@@ -901,7 +1520,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    if (activeTab === 3) {
+    if (currentTabLabel === 'Humidity') {
       return (
         <Paper className={styles.horizontalControlBar} elevation={0}>
           <Typography variant="subtitle2" className={styles.controlTitle}>
@@ -922,7 +1541,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    if (activeTab === 4) {
+    if (currentTabLabel === 'Pressure') {
       return (
         <Paper className={styles.horizontalControlBar} elevation={0}>
           <Typography variant="subtitle2" className={styles.controlTitle}>
@@ -943,7 +1562,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    if (activeTab === 5) {
+    if (currentTabLabel === 'Scatter Analysis') {
       return (
         <Paper className={styles.horizontalControlBar} elevation={0}>
           <Typography variant="subtitle2" className={styles.controlTitle}>
@@ -1011,7 +1630,7 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
       );
     }
 
-    if (activeTab === 6 && datasetMeta.additionalCols.length > 0) {
+    if (currentTabLabel === 'Additional Metrics' && datasetMeta.additionalCols.length > 0) {
       return (
         <Paper className={styles.horizontalControlBar} elevation={0}>
           <Typography variant="subtitle2" className={styles.controlTitle}>
@@ -1037,15 +1656,16 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
 
   const renderStatsCards = () => {
     if (!timeseriesData || timeseriesData.length === 0 || activeMetrics.length === 0) return null;
+    if (currentTabLabel === 'KPI Dashboard' || currentTabLabel === 'Scatter Analysis') return null;
 
     return (
-      <Box className={styles.statsCardsContainer}>
-        <Stack direction="row" spacing={2.5} useFlexGap flexWrap="wrap" className={styles.statsGrid}>
+      <Box sx={{ mb: 1 }}>
+        <Stack direction="row" spacing={2.4} useFlexGap flexWrap="wrap" sx={{ width: '100%' }}>
           {activeMetrics.map((metric) => {
-            const stat = metricsStats[metric] || { min: 'N/A', max: 'N/A' };
+            const stat = metricsStats[metric] || { min: 'N/A', avg: 'N/A', max: 'N/A' };
             return (
-              <Paper key={metric} className={styles.statCard} elevation={0}>
-                <Typography className={styles.statCardMetricName}>
+              <Paper key={metric} className={styles.statsCard} sx={{ flex: 1, minWidth: '220px', p: 2, bgcolor: 'rgba(15, 27, 45, 0.45)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '16px' }} elevation={0}>
+                <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 }}>
                   {metric}
                 </Typography>
                 <Stack direction="row" spacing={3} sx={{ mt: 1 }}>
@@ -1053,6 +1673,12 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
                     <Typography className={styles.statLabel}>Min</Typography>
                     <Typography className={styles.statValue}>
                       {typeof stat.min === 'number' ? stat.min.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : stat.min}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography className={styles.statLabel}>Avg</Typography>
+                    <Typography className={styles.statValue}>
+                      {typeof stat.avg === 'number' ? stat.avg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : stat.avg}
                     </Typography>
                   </Box>
                   <Box>
@@ -1077,22 +1703,24 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2} alignItems="center">
           <Box>
             <Typography variant="h5" className={styles.title}>
-              {activeTab === 0 && 'Wind Speed Timeline'}
-              {activeTab === 1 && 'Wind Direction Timeline'}
-              {activeTab === 2 && 'Ambient Temperature Timeline'}
-              {activeTab === 3 && 'Relative Humidity Timeline'}
-              {activeTab === 4 && 'Atmospheric Pressure Timeline'}
-              {activeTab === 5 && 'Correlation Scatter Workspace'}
-              {activeTab === 6 && 'Dynamic Dataset Column Explorer'}
+              {currentTabLabel === 'KPI Dashboard' && 'Key Performance Indicators'}
+              {currentTabLabel === 'Wind Speed' && 'Wind Speed Timeline'}
+              {currentTabLabel === 'Wind Direction' && 'Wind Direction Timeline'}
+              {currentTabLabel === 'Temperature' && 'Ambient Temperature Timeline'}
+              {currentTabLabel === 'Humidity' && 'Relative Humidity Timeline'}
+              {currentTabLabel === 'Pressure' && 'Atmospheric Pressure Timeline'}
+              {currentTabLabel === 'Scatter Analysis' && 'Correlation Scatter Workspace'}
+              {currentTabLabel === 'Additional Metrics' && 'Dynamic Dataset Column Explorer'}
             </Typography>
             <Typography variant="body2" className={styles.subtitle}>
-              {activeTab === 0 && 'Track and overlay wind speeds across multiple heights simultaneously.'}
-              {activeTab === 1 && 'Scatter timeline of wind direction angles (degrees) representing orientation currents.'}
-              {activeTab === 2 && 'Timeline tracing ambient temperature variations in Celsius.'}
-              {activeTab === 3 && 'Monitoring relative humidity percentages over the dataset observation window.'}
-              {activeTab === 4 && 'Timeline tracking barometric air pressure measurements in millibars (mbar).'}
-              {activeTab === 5 && 'Explore correlations between any pair of metrics. Includes customizable linear regression trendline overlay.'}
-              {activeTab === 6 && 'Plot and visualize remaining columns in the dataset CSV dynamically.'}
+              {currentTabLabel === 'KPI Dashboard' && 'Overview of wind energy performance metrics, availability and records summary.'}
+              {currentTabLabel === 'Wind Speed' && 'Track wind speeds, turbulence intensity, wind shear, and Weibull parameters.'}
+              {currentTabLabel === 'Wind Direction' && 'Scatter timeline of wind direction angles representing orientation currents.'}
+              {currentTabLabel === 'Temperature' && 'Ambient temperature variations in Celsius across the observation window.'}
+              {currentTabLabel === 'Humidity' && 'Traces relative humidity percentages over the dataset window.'}
+              {currentTabLabel === 'Pressure' && 'Traces barometric air pressure measurements in millibars (mbar).'}
+              {currentTabLabel === 'Scatter Analysis' && 'Explore correlations between any pair of metrics with linear trendlines.'}
+              {currentTabLabel === 'Additional Metrics' && 'Plot remaining timeseries variables or display calculated metadata cards.'}
             </Typography>
           </Box>
 
@@ -1117,13 +1745,13 @@ export default function GraphWorkspace({ activeTab, timeseriesData, isLoading, h
           )}
         </Stack>
 
-        {/* Tab-Specific Control Panels - Full Width */}
+        {/* Tab-Specific Control Panels */}
         {renderControlPanel()}
 
-        {/* Dynamic statistics cards displaying Min/Max above the chart */}
+        {/* Dynamic statistics cards displaying Min/Avg/Max above the chart */}
         {renderStatsCards()}
 
-        {/* 100% Full-Width Chart Container (Requirement 6 & 8) */}
+        {/* 100% Full-Width Chart Container */}
         <Box className={styles.chartWrapper}>
           {renderChart()}
         </Box>
