@@ -1,0 +1,301 @@
+# ────────────────────────────────────────────────────────────────────
+# Wind Data Platform – CI Pipeline
+# ────────────────────────────────────────────────────────────────────
+# Architecture:
+#
+#   ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐
+#   │  lint        │  │ smoke-tests  │  │ frontend-build   │
+#   └──────┬──────┘  └──────┬───────┘  └──────┬───────────┘
+#          │                │                  │
+#          ▼                ▼                  │
+#   ┌─────────────┐  ┌──────────────┐         │
+#   │ unit-tests   │  │ integration  │         │
+#   └──────┬──────┘  └──────┬───────┘         │
+#          │                │                  │
+#          ▼                ▼                  │
+#   ┌────────────────────────────┐             │
+#   │   adversarial-tests        │             │
+#   └────────────┬───────────────┘             │
+#                │                             │
+#                ▼                             │
+#   ┌────────────────────────────┐             │
+#   │   stress-tests             │             │
+#   └────────────┬───────────────┘             │
+#                │                             │
+#                ▼                             ▼
+#   ┌──────────────────────────────────────────────┐
+#   │              ci-gate (final status)          │
+#   └──────────────────────────────────────────────┘
+#
+# Design decisions:
+#  - Smoke tests run first (fast, catch wiring issues immediately)
+#  - Lint + smoke are parallel (no dependency between them)
+#  - Unit + integration gate on smoke (don't waste time if basics are broken)
+#  - Adversarial gates on unit+integration (catch hostile inputs after correctness)
+#  - Stress gates on adversarial (most expensive, run last)
+#  - Frontend build runs fully in parallel (independent of server tests)
+#  - ci-gate aggregates all results for branch protection rules
+#  - Node version matrix for compatibility assurance
+# ────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'feature/**', 'fix/**']
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_ENV: test
+
+# ────────────────────────────────────────────────────────────────────
+# JOBS
+# ────────────────────────────────────────────────────────────────────
+
+jobs:
+
+  # ── Stage 0: Parallel fast checks ──────────────────────────────
+
+  lint:
+    name: Lint & Syntax Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Check for syntax errors (dry-run require of key modules)
+        working-directory: server
+        run: |
+          node -e "require('./src/utils/validator')"
+          node -e "require('./src/utils/columnMapper')"
+          echo "✓ All modules load without syntax errors"
+
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Run smoke tests
+        working-directory: server
+        run: npx jest --verbose --ci --forceExit tests/smoke
+
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  # ── Stage 1: Core tests (gate on smoke) ────────────────────────
+
+  unit-tests:
+    name: Unit Tests (Node ${{ matrix.node-version }})
+    needs: [lint, smoke-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        node-version: [20, 22]
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Run unit tests
+        working-directory: server
+        run: npx jest --verbose --ci --forceExit --coverage tests/unit
+
+      - name: Upload coverage report
+        if: matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-coverage
+          path: server/coverage
+          retention-days: 14
+
+  integration-tests:
+    name: Integration Tests
+    needs: [lint, smoke-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Run integration tests
+        working-directory: server
+        run: npx jest --verbose --ci --forceExit tests/integration
+
+  # ── Stage 2: Adversarial (gate on unit + integration) ──────────
+
+  adversarial-tests:
+    name: Adversarial Tests
+    needs: [unit-tests, integration-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Run adversarial tests
+        working-directory: server
+        run: npx jest --verbose --ci --forceExit tests/adversarial
+
+  # ── Stage 3: Stress (gate on adversarial) ──────────────────────
+
+  stress-tests:
+    name: Stress Tests
+    needs: [adversarial-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Run stress tests
+        working-directory: server
+        run: npx jest --verbose --ci --forceExit tests/stress
+
+  # ── Final gate ─────────────────────────────────────────────────
+
+  ci-gate:
+    name: CI Gate ✓
+    if: always()
+    needs:
+      - lint
+      - smoke-tests
+      - unit-tests
+      - integration-tests
+      - adversarial-tests
+      - stress-tests
+      - frontend-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate pipeline results
+        run: |
+          echo "═══════════════════════════════════════════════════"
+          echo "              CI Pipeline Summary                  "
+          echo "═══════════════════════════════════════════════════"
+          echo "Lint:            ${{ needs.lint.result }}"
+          echo "Smoke Tests:     ${{ needs.smoke-tests.result }}"
+          echo "Unit Tests:      ${{ needs.unit-tests.result }}"
+          echo "Integration:     ${{ needs.integration-tests.result }}"
+          echo "Adversarial:     ${{ needs.adversarial-tests.result }}"
+          echo "Stress Tests:    ${{ needs.stress-tests.result }}"
+          echo "Frontend Build:  ${{ needs.frontend-build.result }}"
+          echo "═══════════════════════════════════════════════════"
+
+      - name: Fail if any required job failed
+        if: >-
+          needs.lint.result == 'failure' ||
+          needs.smoke-tests.result == 'failure' ||
+          needs.unit-tests.result == 'failure' ||
+          needs.integration-tests.result == 'failure' ||
+          needs.adversarial-tests.result == 'failure' ||
+          needs.stress-tests.result == 'failure' ||
+          needs.frontend-build.result == 'failure'
+        run: |
+          echo "❌ One or more CI jobs failed. See summary above."
+          exit 1
+
+      - name: All checks passed
+        run: echo "✅ All CI checks passed successfully."
