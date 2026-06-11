@@ -29,6 +29,7 @@ import {
   FiLoader,
 } from 'react-icons/fi';
 import { apiClient, fetchUploadStatus } from '../../services/analyticsApi';
+import { getSocket } from '../../services/socket';
 import styles from './CsvUploadModal.module.css';
 
 const stagesList = [
@@ -61,7 +62,7 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
   const [failedStage, setFailedStage] = useState('');
 
   const inputRef = useRef(null);
-  const pollingIntervalRef = useRef(null);
+  const socketCleanupRef = useRef(null);
 
   // Reset modal state on close/open
   useEffect(() => {
@@ -70,19 +71,19 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
     }
   }, [open]);
 
-  // Clean up polling interval on unmount
+  // Clean up socket listener on unmount
   useEffect(() => {
     return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
+      if (socketCleanupRef.current) {
+        socketCleanupRef.current();
       }
     };
   }, []);
 
   const resetState = () => {
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
+    if (socketCleanupRef.current) {
+      socketCleanupRef.current();
+      socketCleanupRef.current = null;
     }
     setFile(null);
     setDragActive(false);
@@ -96,63 +97,81 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
     setFailedStage('');
   };
 
-  const startStatusPolling = (datasetId) => {
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
+  const startStatusListening = (datasetId) => {
+    if (socketCleanupRef.current) {
+      socketCleanupRef.current();
     }
 
-    pollingIntervalRef.current = setInterval(async () => {
-      try {
-        const statusData = await fetchUploadStatus(datasetId);
+    const socket = getSocket();
 
-        if (statusData.status === 'processing') {
-          setUploadProgress(statusData.progress || 0);
-          
-          let mappedStage = 'processing';
-          if (statusData.stage === 'validating') {
-            mappedStage = 'validating';
-          } else if (statusData.stage === 'saving') {
-            mappedStage = 'saving';
-          }
-          setCurrentProcessingStage(mappedStage);
-        } else if (statusData.status === 'completed') {
-          clearInterval(pollingIntervalRef.current);
-          pollingIntervalRef.current = null;
+    // Subscribe to specific dataset updates room
+    socket.emit('subscribe', datasetId);
 
-          setUploadSummary({
-            totalRows: statusData.totalRows ?? 0,
-            validRows: statusData.validRows ?? 0,
-            invalidRows: statusData.invalidRows ?? 0,
-            processingTime: statusData.processingTime,
-          });
-          setUploadStatus('success');
-          setCurrentProcessingStage('completed');
-          setUploadProgress(100);
+    const handleProgress = (data) => {
+      if (data.datasetId !== datasetId) return;
 
-          showToast({
-            severity: 'success',
-            message: `Successfully uploaded dataset: ${statusData.validRows ?? 0} valid rows imported!`,
-          });
+      setUploadProgress(data.progressPercentage || 0);
 
-          if (onUploadSuccess) {
-            onUploadSuccess(datasetId);
-          }
-        } else if (statusData.status === 'failed') {
-          clearInterval(pollingIntervalRef.current);
-          pollingIntervalRef.current = null;
-
-          setErrorDetails(statusData.errorDetails || 'Failed to process CSV file');
-          setFailedStage(statusData.stage || '');
-          setUploadStatus('error');
-          showToast({
-            severity: 'error',
-            message: `Processing failed: ${statusData.errorDetails || 'Error occurred during processing'}`,
-          });
-        }
-      } catch (pollError) {
-        console.error('Error polling status:', pollError);
+      let mappedStage = 'processing';
+      if (data.stage === 'validating') {
+        mappedStage = 'validating';
+      } else if (data.stage === 'saving') {
+        mappedStage = 'saving';
       }
-    }, 1000);
+      setCurrentProcessingStage(mappedStage);
+    };
+
+    const handleCompleted = (data) => {
+      if (data.datasetId !== datasetId) return;
+
+      cleanup();
+
+      setUploadSummary({
+        totalRows: data.totalRows ?? 0,
+        validRows: data.validRows ?? 0,
+        invalidRows: data.invalidRows ?? 0,
+        processingTime: data.processingTime,
+      });
+      setUploadStatus('success');
+      setCurrentProcessingStage('completed');
+      setUploadProgress(100);
+
+      showToast({
+        severity: 'success',
+        message: `Successfully uploaded dataset: ${data.validRows ?? 0} valid rows imported!`,
+      });
+
+      if (onUploadSuccess) {
+        onUploadSuccess(datasetId);
+      }
+    };
+
+    const handleFailed = (data) => {
+      if (data.datasetId !== datasetId) return;
+
+      cleanup();
+
+      setErrorDetails(data.errorDetails || 'Failed to process CSV file');
+      setFailedStage(data.stage || '');
+      setUploadStatus('error');
+      showToast({
+        severity: 'error',
+        message: `Processing failed: ${data.errorDetails || 'Error occurred during processing'}`,
+      });
+    };
+
+    const cleanup = () => {
+      socket.off('uploadProgress', handleProgress);
+      socket.off('uploadCompleted', handleCompleted);
+      socket.off('uploadFailed', handleFailed);
+      socket.emit('unsubscribe', datasetId);
+    };
+
+    socket.on('uploadProgress', handleProgress);
+    socket.on('uploadCompleted', handleCompleted);
+    socket.on('uploadFailed', handleFailed);
+
+    socketCleanupRef.current = cleanup;
   };
 
   // Simple CSV parser for browser preview
@@ -285,7 +304,7 @@ export default function CsvUploadModal({ open, onClose, onUploadSuccess, showToa
 
       if (response.data && response.data.success) {
         const datasetId = response.data.datasetId;
-        startStatusPolling(datasetId);
+        startStatusListening(datasetId);
       } else {
         throw new Error(response.data?.message || 'Server did not report success');
       }
