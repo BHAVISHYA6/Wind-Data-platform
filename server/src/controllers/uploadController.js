@@ -6,7 +6,7 @@ const WindData = require('../models/WindData');
 const ErrorLog = require('../models/ErrorLog');
 const Dataset = require('../models/Dataset');
 const { mapWindTurbineCsvRows, mapHeader } = require('../utils/columnMapper');
-const { isBlank, parseTimestamp, isWindSpeedField, isWindDirectionField, validateWindTurbineRow } = require('../utils/validator');
+const { isBlank, parseTimestamp, isWindSpeedField, isWindDirectionField, validateWindTurbineRow, createConsecutiveTracker } = require('../utils/validator');
 
 const toNumber = (value) => {
 	if (isBlank(value)) {
@@ -109,6 +109,8 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 		}
 	};
 
+	const consecutiveTracker = createConsecutiveTracker(5);
+
 	const processBatch = async (batch, startIndex) => {
 		const t_val_start = performance.now();
 		const validDocuments = [];
@@ -127,7 +129,30 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 			const mappedRow = mapRowHeaders(rawRow);
 			const validationResult = validateWindTurbineRow(mappedRow, actualIndex);
 
-			if (validationResult.valid) {
+			// C3: Check consecutive identical values for speed and direction fields
+			const consecutiveErrors = [];
+			const fieldNames = Object.keys(mappedRow);
+
+			fieldNames.filter(isWindSpeedField).forEach((fieldName) => {
+				if (consecutiveTracker.check(fieldName, mappedRow[fieldName])) {
+					consecutiveErrors.push(
+						`Row ${actualIndex + 1}: ${fieldName} has 5+ consecutive identical values (possible sensor freeze)`
+					);
+				}
+			});
+
+			fieldNames.filter(isWindDirectionField).forEach((fieldName) => {
+				if (consecutiveTracker.check(fieldName, mappedRow[fieldName])) {
+					consecutiveErrors.push(
+						`Row ${actualIndex + 1}: ${fieldName} has 5+ consecutive identical values (possible sensor freeze)`
+					);
+				}
+			});
+
+			const allErrors = [...validationResult.errors, ...consecutiveErrors];
+			const isValid = allErrors.length === 0;
+
+			if (isValid) {
 				const doc = buildWindDataDocument(mappedRow, rawRow);
 				doc.datasetId = datasetId;
 				validDocuments.push(doc);
@@ -135,7 +160,7 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 				invalidDocuments.push({
 					datasetId,
 					rowNumber: actualIndex + 1,
-					validationErrors: validationResult.errors,
+					validationErrors: allErrors,
 					rawRowData: rawRow,
 				});
 			}

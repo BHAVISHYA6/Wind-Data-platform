@@ -166,7 +166,7 @@ const validateWindTurbineRow = (
 		isWindDirectionField
 	);
 
-	// Wind speed validation
+	// Wind speed validation (spec: 2–60 m/s)
 	speedFields.forEach((fieldName) => {
 		const value = row[fieldName];
 
@@ -181,12 +181,12 @@ const validateWindTurbineRow = (
 			return;
 		}
 
-		if (!validateRange(value, 0, 60)) {
+		if (!validateRange(value, 2, 60)) {
 			errors.push(
 				buildRangeError(
 					rowIndex,
 					fieldName,
-					0,
+					2,
 					60,
 					value,
 					'wind speed'
@@ -261,6 +261,57 @@ const validateWindTurbineCsv = (
 	};
 };
 
+/**
+ * Factory: creates a per-dataset consecutive-identical-value tracker.
+ * Must be instantiated once per dataset upload (NOT module-level)
+ * so concurrent uploads don't share state.
+ *
+ * Usage:
+ *   const tracker = createConsecutiveTracker(5);
+ *   // For each row, call tracker.check(fieldName, rawValue)
+ *   // Returns true if the value is the Nth consecutive identical value.
+ */
+const createConsecutiveTracker = (threshold = 5) => {
+	const state = new Map();
+
+	return {
+		/**
+		 * @param {string} fieldName - column name being tracked
+		 * @param {*} rawValue - raw CSV cell value
+		 * @returns {boolean} true if this is the `threshold`-th (or more) consecutive identical value
+		 */
+		check(fieldName, rawValue) {
+			if (isBlank(rawValue)) return false;
+
+			const numericValue = Number(rawValue);
+			if (!Number.isFinite(numericValue)) return false;
+
+			const entry = state.get(fieldName) || { lastValue: null, count: 0 };
+
+			if (entry.lastValue === numericValue) {
+				entry.count += 1;
+			} else {
+				entry.lastValue = numericValue;
+				entry.count = 1;
+			}
+
+			state.set(fieldName, entry);
+			return entry.count >= threshold;
+		},
+
+		/** Reset all tracking state (useful for testing). */
+		reset() {
+			state.clear();
+		},
+
+		/** Read current count for a field (useful for testing). */
+		getCount(fieldName) {
+			const entry = state.get(fieldName);
+			return entry ? entry.count : 0;
+		},
+	};
+};
+
 module.exports = {
 	isBlank,
 	parseTimestamp,
@@ -272,4 +323,5 @@ module.exports = {
 	validateRange,
 	validateWindTurbineRow,
 	validateWindTurbineCsv,
+	createConsecutiveTracker,
 };
