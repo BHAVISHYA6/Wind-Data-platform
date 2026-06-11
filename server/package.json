@@ -6,6 +6,8 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "jest --verbose",
+    "test:ci": "jest --verbose --ci --forceExit",
+    "test:coverage": "jest --verbose --ci --forceExit --coverage",
     "test:unit": "jest --verbose tests/unit",
     "test:integration": "jest --verbose tests/integration",
     "test:smoke": "jest --verbose tests/smoke",
