@@ -166,6 +166,19 @@ const validateWindTurbineRow = (
 		isWindDirectionField
 	);
 
+	// C4: Reject rows that have no wind speed or direction columns
+	if (speedFields.length === 0) {
+		errors.push(
+			`Row ${rowIndex + 1}: missing required wind speed column`
+		);
+	}
+
+	if (directionFields.length === 0) {
+		errors.push(
+			`Row ${rowIndex + 1}: missing required wind direction column`
+		);
+	}
+
 	// Wind speed validation (spec: 2–60 m/s)
 	speedFields.forEach((fieldName) => {
 		const value = row[fieldName];
@@ -312,6 +325,36 @@ const createConsecutiveTracker = (threshold = 5) => {
 	};
 };
 
+/**
+ * Dataset-level header validation.
+ * Call once with the mapped header names from the first parsed row.
+ * Returns { valid, errors } — if invalid, abort the entire dataset.
+ */
+const validateRequiredColumns = (mappedHeaders = []) => {
+	const errors = [];
+
+	const hasSpeed = mappedHeaders.some(isWindSpeedField);
+	const hasDirection = mappedHeaders.some(isWindDirectionField);
+	const hasTimestamp = mappedHeaders.includes('timestamp');
+
+	if (!hasTimestamp) {
+		errors.push('Dataset is missing required timestamp column');
+	}
+
+	if (!hasSpeed) {
+		errors.push('Dataset is missing required wind speed column');
+	}
+
+	if (!hasDirection) {
+		errors.push('Dataset is missing required wind direction column');
+	}
+
+	return {
+		valid: errors.length === 0,
+		errors,
+	};
+};
+
 module.exports = {
 	isBlank,
 	parseTimestamp,
@@ -324,4 +367,5 @@ module.exports = {
 	validateWindTurbineRow,
 	validateWindTurbineCsv,
 	createConsecutiveTracker,
+	validateRequiredColumns,
 };

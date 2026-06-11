@@ -6,7 +6,7 @@ const WindData = require('../models/WindData');
 const ErrorLog = require('../models/ErrorLog');
 const Dataset = require('../models/Dataset');
 const { mapWindTurbineCsvRows, mapHeader } = require('../utils/columnMapper');
-const { isBlank, parseTimestamp, isWindSpeedField, isWindDirectionField, validateWindTurbineRow, createConsecutiveTracker } = require('../utils/validator');
+const { isBlank, parseTimestamp, isWindSpeedField, isWindDirectionField, validateWindTurbineRow, createConsecutiveTracker, validateRequiredColumns } = require('../utils/validator');
 
 const toNumber = (value) => {
 	if (isBlank(value)) {
@@ -199,11 +199,28 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 		const readStream = fs.createReadStream(filePath);
 		const BATCH_SIZE = 2000;
 		let rowBuffer = [];
+		let headerValidated = false;
 
 		Papa.parse(readStream, {
 			header: true,
 			skipEmptyLines: true,
 			step: (results, parser) => {
+				// C4: Validate required columns on the very first row
+				if (!headerValidated) {
+					headerValidated = true;
+					const rawHeaders = Object.keys(results.data);
+					const mappedHeaders = rawHeaders.map(mapHeader);
+					const headerCheck = validateRequiredColumns(mappedHeaders);
+
+					if (!headerCheck.valid) {
+						parser.abort();
+						handleFailure(new Error(
+							`Required columns missing: ${headerCheck.errors.join('; ')}`
+						));
+						return;
+					}
+				}
+
 				rowBuffer.push({ rawRow: results.data });
 
 				if (rowBuffer.length >= BATCH_SIZE) {
