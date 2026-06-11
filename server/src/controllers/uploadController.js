@@ -6,7 +6,7 @@ const WindData = require('../models/WindData');
 const ErrorLog = require('../models/ErrorLog');
 const Dataset = require('../models/Dataset');
 const { mapWindTurbineCsvRows, mapHeader } = require('../utils/columnMapper');
-const { isBlank, isWindSpeedField, isWindDirectionField, validateWindTurbineRow } = require('../utils/validator');
+const { isBlank, parseTimestamp, isWindSpeedField, isWindDirectionField, validateWindTurbineRow } = require('../utils/validator');
 
 const toNumber = (value) => {
 	if (isBlank(value)) {
@@ -55,7 +55,7 @@ const buildWindDataDocument = (row, rawRowData) => {
 	});
 
 	return {
-		timestamp: new Date(row.timestamp),
+		timestamp: parseTimestamp(row.timestamp),
 		windSpeeds,
 		windDirections,
 		humidity,

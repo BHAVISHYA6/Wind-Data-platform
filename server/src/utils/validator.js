@@ -6,18 +6,57 @@ const isBlank = (value) => {
 	);
 };
 
-const isValidDate = (value) => {
-	if (isBlank(value)) {
-		return false;
+/**
+ * Shared timestamp parser used by both validation and document construction.
+ * Returns a valid Date object or null.
+ *
+ * Supported formats:
+ *   - DD-MM-YYYY HH:mm  (primary CSV format)
+ *   - ISO 8601 / YYYY-MM-DD variants
+ */
+const parseTimestamp = (value) => {
+	if (isBlank(value)) return null;
+
+	// Only accept string inputs — reject numbers, arrays, objects, etc.
+	if (typeof value !== 'string') return null;
+
+	const s = value.trim();
+
+	// Try DD-MM-YYYY HH:mm first (primary CSV format)
+	const ddmmyyyy = s.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/);
+	if (ddmmyyyy) {
+		const [, dd, mm, yyyy, hh, min] = ddmmyyyy;
+		const date = new Date(
+			Date.UTC(
+				Number(yyyy),
+				Number(mm) - 1,
+				Number(dd),
+				Number(hh),
+				Number(min)
+			)
+		);
+		// Validate that the calendar date components round-trip correctly
+		// (rejects impossible dates like 31-02-2024)
+		const valid =
+			date.getUTCFullYear() === Number(yyyy) &&
+			date.getUTCMonth() === Number(mm) - 1 &&
+			date.getUTCDate() === Number(dd) &&
+			date.getUTCHours() === Number(hh) &&
+			date.getUTCMinutes() === Number(min);
+		return valid ? date : null;
 	}
 
-	// Expected format:
-	// DD-MM-YYYY HH:mm
+	// Fallback: accept ISO 8601 variants (must start with YYYY- pattern)
+	if (/^\d{4}-\d{2}/.test(s)) {
+		const isoDate = new Date(s);
+		return Number.isNaN(isoDate.getTime()) ? null : isoDate;
+	}
 
-	const regex =
-		/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/;
+	return null;
+};
 
-	return regex.test(String(value).trim());
+const isValidDate = (value) => {
+	return parseTimestamp(value) !== null;
 };
 
 const isValidNumber = (value) => {
@@ -224,6 +263,7 @@ const validateWindTurbineCsv = (
 
 module.exports = {
 	isBlank,
+	parseTimestamp,
 	isValidDate,
 	isValidNumber,
 	normalizeFieldName,
