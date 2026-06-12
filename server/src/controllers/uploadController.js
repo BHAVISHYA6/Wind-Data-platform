@@ -272,7 +272,6 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 									invalidRows,
 									progressPercentage: valProgress,
 								};
-								io.emit('uploadProgress', validatingPayload);
 								io.to(datasetId.toString()).emit('uploadProgress', validatingPayload);
 							}
 							return processBatch(currentBatch, processedRows);
