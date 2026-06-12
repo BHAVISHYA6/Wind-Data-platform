@@ -18,6 +18,7 @@ import {
   fetchTimeseriesData,
   fetchDatasetsList,
 } from './services/analyticsApi';
+import { disconnectSocket } from './services/socket';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState(0);
@@ -55,6 +56,13 @@ export default function App() {
     severity: 'success', // 'success' | 'error' | 'info' | 'warning'
     message: '',
   });
+
+  // Disconnect the shared WebSocket when the app unmounts
+  useEffect(() => {
+    return () => {
+      disconnectSocket();
+    };
+  }, []);
 
   // Keep summary metrics cards reactively synchronized with both summary totals and timeseries details
   useEffect(() => {
