@@ -227,7 +227,7 @@ export default function App() {
           hasError={timeseriesError}
           summaryData={rawSummaryData}
         />
-        
+
         {/* Render live error logs table */}
         <ErrorLogsTable rows={formattedErrorLogs} />
       </DashboardLayout>
