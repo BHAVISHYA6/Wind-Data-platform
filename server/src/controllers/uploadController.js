@@ -7,6 +7,7 @@ const ErrorLog = require('../models/ErrorLog');
 const Dataset = require('../models/Dataset');
 const { mapWindTurbineCsvRows, mapHeader } = require('../utils/columnMapper');
 const { isBlank, parseTimestamp, isWindSpeedField, isWindDirectionField, validateWindTurbineRow, createConsecutiveTracker, validateRequiredColumns } = require('../utils/validator');
+const { getIO } = require('../utils/socket');
 
 const toNumber = (value) => {
 	if (isBlank(value)) {
@@ -105,6 +106,17 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 		} catch (dbErr) {
 			console.error('Failed to update dataset failure status in DB:', dbErr);
 		} finally {
+			const io = getIO();
+			if (io) {
+				const failedPayload = {
+					datasetId: datasetId.toString(),
+					status: 'failed',
+					stage: 'failed',
+					errorDetails: err.message || 'Unknown processing error',
+				};
+				io.emit('uploadFailed', failedPayload);
+				io.to(datasetId.toString()).emit('uploadFailed', failedPayload);
+			}
 			await fsPromises.unlink(filePath).catch(() => {});
 		}
 	};
@@ -185,6 +197,12 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 		};
 	};
 
+	const io = getIO();
+	if (io) {
+		io.emit('uploadStarted', { datasetId: datasetId.toString() });
+		io.to(datasetId.toString()).emit('uploadStarted', { datasetId: datasetId.toString() });
+	}
+
 	try {
 		// 1. Initial count lines for totalRows calculation
 		const totalLines = await countLines(filePath);
@@ -195,6 +213,21 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 			stage: 'processing',
 			progress: 0,
 		});
+
+		if (io) {
+			const initialPayload = {
+				datasetId: datasetId.toString(),
+				status: 'processing',
+				stage: 'processing',
+				totalRows,
+				processedRows: 0,
+				validRows: 0,
+				invalidRows: 0,
+				progressPercentage: 0,
+			};
+			io.emit('uploadProgress', initialPayload);
+			io.to(datasetId.toString()).emit('uploadProgress', initialPayload);
+		}
 
 		const readStream = fs.createReadStream(filePath);
 		const BATCH_SIZE = 2000;
@@ -229,7 +262,24 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 					rowBuffer = [];
 
 					Dataset.findByIdAndUpdate(datasetId, { stage: 'validating' })
-						.then(() => processBatch(currentBatch, processedRows))
+						.then(() => {
+							if (io) {
+								const valProgress = totalRows > 0 ? Math.min(99, Math.round((processedRows / totalRows) * 100)) : 0;
+								const validatingPayload = {
+									datasetId: datasetId.toString(),
+									status: 'processing',
+									stage: 'validating',
+									totalRows,
+									processedRows,
+									validRows,
+									invalidRows,
+									progressPercentage: valProgress,
+								};
+								io.emit('uploadProgress', validatingPayload);
+								io.to(datasetId.toString()).emit('uploadProgress', validatingPayload);
+							}
+							return processBatch(currentBatch, processedRows);
+						})
 						.then(async (result) => {
 							processedRows += currentBatch.length;
 							validRows += result.validCount;
@@ -247,6 +297,21 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 								stage: 'processing',
 							});
 
+							if (io) {
+								const progressPayload = {
+									datasetId: datasetId.toString(),
+									status: 'processing',
+									stage: 'processing',
+									totalRows,
+									processedRows,
+									validRows,
+									invalidRows,
+									progressPercentage: progress,
+								};
+								io.emit('uploadProgress', progressPayload);
+								io.to(datasetId.toString()).emit('uploadProgress', progressPayload);
+							}
+
 							parser.resume();
 						})
 						.catch(async (err) => {
@@ -262,6 +327,23 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 						rowBuffer = [];
 
 						await Dataset.findByIdAndUpdate(datasetId, { stage: 'validating' });
+						
+						if (io) {
+							const valProgress = totalRows > 0 ? Math.min(99, Math.round((processedRows / totalRows) * 100)) : 0;
+							const validatingPayload = {
+								datasetId: datasetId.toString(),
+								status: 'processing',
+								stage: 'validating',
+								totalRows,
+								processedRows,
+								validRows,
+								invalidRows,
+								progressPercentage: valProgress,
+							};
+							io.emit('uploadProgress', validatingPayload);
+							io.to(datasetId.toString()).emit('uploadProgress', validatingPayload);
+						}
+
 						const result = await processBatch(currentBatch, processedRows);
 
 						processedRows += currentBatch.length;
@@ -289,6 +371,27 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 							total: parseFloat(t_total.toFixed(2)),
 						},
 					});
+
+					if (io) {
+						const completedPayload = {
+							datasetId: datasetId.toString(),
+							status: 'completed',
+							stage: 'completed',
+							progress: 100,
+							totalRows: processedRows,
+							processedRows,
+							validRows,
+							invalidRows,
+							processingTime: {
+								parsing: parseFloat(t_parse.toFixed(2)),
+								validation: parseFloat(totalValidationTime.toFixed(2)),
+								saving: parseFloat(totalSavingTime.toFixed(2)),
+								total: parseFloat(t_total.toFixed(2)),
+							},
+						};
+						io.emit('uploadCompleted', completedPayload);
+						io.to(datasetId.toString()).emit('uploadCompleted', completedPayload);
+					}
 
 					// Telemetry console logging
 					console.log('--- CSV Processing Benchmarks ---');
