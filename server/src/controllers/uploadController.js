@@ -114,7 +114,6 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 					stage: 'failed',
 					errorDetails: err.message || 'Unknown processing error',
 				};
-				io.emit('uploadFailed', failedPayload);
 				io.to(datasetId.toString()).emit('uploadFailed', failedPayload);
 			}
 			await fsPromises.unlink(filePath).catch(() => {});
@@ -199,7 +198,6 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 
 	const io = getIO();
 	if (io) {
-		io.emit('uploadStarted', { datasetId: datasetId.toString() });
 		io.to(datasetId.toString()).emit('uploadStarted', { datasetId: datasetId.toString() });
 	}
 
@@ -225,7 +223,6 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 				invalidRows: 0,
 				progressPercentage: 0,
 			};
-			io.emit('uploadProgress', initialPayload);
 			io.to(datasetId.toString()).emit('uploadProgress', initialPayload);
 		}
 
@@ -308,7 +305,6 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 									invalidRows,
 									progressPercentage: progress,
 								};
-								io.emit('uploadProgress', progressPayload);
 								io.to(datasetId.toString()).emit('uploadProgress', progressPayload);
 							}
 
@@ -340,7 +336,6 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 								invalidRows,
 								progressPercentage: valProgress,
 							};
-							io.emit('uploadProgress', validatingPayload);
 							io.to(datasetId.toString()).emit('uploadProgress', validatingPayload);
 						}
 
@@ -389,7 +384,6 @@ const processDatasetInBackground = async (datasetId, filePath) => {
 								total: parseFloat(t_total.toFixed(2)),
 							},
 						};
-						io.emit('uploadCompleted', completedPayload);
 						io.to(datasetId.toString()).emit('uploadCompleted', completedPayload);
 					}
 

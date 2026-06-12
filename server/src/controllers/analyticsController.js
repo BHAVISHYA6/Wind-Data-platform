@@ -100,14 +100,16 @@ const getTimeseries = async (req, res) => {
 			});
 		}
 
-		const limit = req.query.limit ? parseInt(req.query.limit, 10) : 5000;
-		const query = WindData.find({ datasetId }).sort({ timestamp: 1 });
-		
-		if (limit > 0) {
-			query.limit(limit);
-		}
+		const MAX_LIMIT = 10000;
+		const requested = req.query.limit ? parseInt(req.query.limit, 10) : MAX_LIMIT;
+		const limit = Number.isFinite(requested) && requested > 0
+			? Math.min(requested, MAX_LIMIT)
+			: MAX_LIMIT;
 
-		const records = await query.lean();
+		const records = await WindData.find({ datasetId })
+			.sort({ timestamp: 1 })
+			.limit(limit)
+			.lean();
 
 		res.status(200).json({
 			success: true,
